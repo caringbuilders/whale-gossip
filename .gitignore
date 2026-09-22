@@ -1,0 +1,32 @@
+# Dependencies and generated Node / Next.js output
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+.cache/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+
+# Real environment files; the example must contain placeholders only
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Private acquisition workspace: raw responses, identities, caches and ledgers
+# Store all acquisition artifacts here; export reviewed fixtures separately.
+/data/*
+!/data/sample-deck.json
+!/data/fixtures/
+/private/
+/.private/
+/tmp/
+
+# Windows download metadata
+*:Zone.Identifier
