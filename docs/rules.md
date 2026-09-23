@@ -2,7 +2,7 @@
 
 `lib/rules.ts` is a pure offline rules module. Its normalized event interface is **provisional** until actual Nansen token DEX responses and provider semantics are validated. The module performs no network, database, environment-variable, or UI work.
 
-Rule behavior is versioned. Version 2 closes the coverage-discriminant, runtime-input, identifier, duplicate-conflict, and multi-leg ambiguity gaps found in the review of version 1.
+Rule behavior is versioned. Version 3 retains the version 2 coverage and ambiguity fixes and adds strict Ethereum event-chain and transaction-hash normalization plus stronger temporal consistency for coverage evidence.
 
 ## Window and threshold conventions
 
@@ -22,11 +22,13 @@ The proposal also requires initial cutoffs to be 10–40 days before retrieval. 
 
 The round token and wallet, and every event token and wallet, must be syntactically valid Ethereum addresses: `0x` followed by 40 hexadecimal characters. Addresses are lowercased for internal comparison and output so case-only differences cannot silently hide matching events. This is syntax validation and deterministic normalization only. It does not validate checksum casing, contract existence, address type, or Nansen's actual response format. The acquisition adapter remains responsible for validating provider fields and retaining the original source representation in private provenance.
 
-The chain identifier remains exactly `ethereum`. Provider chain aliases and casing have not been validated and must be normalized by the future adapter before compilation.
+The chain identifier remains exactly `ethereum`. Every supplied event must also use exactly `ethereum`; an event marked `Ethereum`, `eth`, another chain, or an empty value is invalid input even when its token or wallet would otherwise be irrelevant. The future acquisition adapter must supply only normalized Ethereum events. Provider chain aliases and casing have not been validated.
+
+Every transaction hash must be `0x` followed by exactly 64 hexadecimal characters. Valid hashes are lowercased before duplicate comparison and transaction grouping. Missing, whitespace-only, shortened, nonhex, or otherwise malformed hashes are invalid. This syntax and normalization rule does not validate that a transaction exists or establish how provider rows map to transaction legs.
 
 ## Completeness and conservative rejection
 
-Coverage is mandatory for the lookback and answer window. Each segment must have status exactly `complete`, a valid half-open range covering the full required interval, and no contradictory failure fields. Missing, malformed, unknown, explicitly incomplete, insufficient, or contradictory evidence is unscorable. `observedAtMs` must be a safe integer at or after the answer-window end. An event array, an empty result, elapsed time, or a ten-day-old cutoff cannot establish completeness.
+Coverage is mandatory for the lookback and answer window. Each segment must have status exactly `complete`, a valid half-open range covering the full required interval, and no contradictory failure fields. Missing, malformed, unknown, explicitly incomplete, insufficient, or contradictory evidence is unscorable. `observedAtMs` must be a safe integer at or after the answer-window end, and neither claimed coverage end may be later than `observedAtMs`. An event array, an empty result, elapsed time, or a ten-day-old cutoff cannot establish completeness.
 
 A null, non-finite, or negative USD value on a matching event inside either required window is conservatively relevant and makes the round unscorable. This may reject some events a future validated schema could safely exclude, but it cannot silently create No trade or change the visible tape.
 
@@ -54,9 +56,11 @@ A future public question serializer must use an explicit allowlist and omit at l
 - wallet identity and any raw provider labels;
 - transaction hashes and internal event IDs;
 - the answer and all outcome evidence;
+- exact event, cutoff, lookback-start, and answer-window timestamps;
+- exact USD values;
 - private provenance and raw acquisition records.
 
-The serializer and its answer-leakage tests do not exist yet.
+Public clues must express event timing relatively and trade size through reviewed bands rather than exact timestamps or USD amounts. These transformations reduce trivial transaction lookup but do not guarantee wallet anonymity: a distinctive sequence of public clues may still be identifiable when compared with public chain data. The serializer and its answer-leakage tests do not exist yet.
 
 ## Future acquisition-adapter guarantees
 
@@ -64,7 +68,7 @@ Before real events may enter this module, the acquisition adapter and candidate-
 
 1. Enforce the proposal's initial 10–40-day cutoff-selection range using recorded retrieval time, separately from the rules compiler.
 2. Verify that the provider endpoint returns token-relative Buy/Sell direction and map it to lowercase `buy` or `sell`.
-3. Validate and canonicalize Ethereum, featured-token, wallet, chain, and transaction identifiers consistently while retaining original private provenance.
+3. Validate and canonicalize Ethereum, featured-token, wallet, chain, and transaction identifiers consistently while retaining original private provenance; pass only events whose normalized chain is exactly `ethereum`.
 4. Convert timestamps to safe-integer UTC epoch milliseconds without losing ordering precision.
 5. Produce a stable unique `eventId` for each transaction leg and retain the transaction hash; pagination duplicates must reuse the same ID while distinct legs must not.
 6. Normalize estimated USD values without replacing missing or invalid values with zero and without inventing aggregation or netting semantics.
@@ -73,3 +77,5 @@ Before real events may enter this module, the acquisition adapter and candidate-
 9. Preserve immutable source/provenance metadata outside this pure module so a compiled round can later be audited and versioned.
 
 The synthetic test events exercise this internal contract only. They are not verified historical rounds, provider fixtures, evidence of a live integration, or evidence of provider completeness.
+
+Duplicate conflicts are deliberately checked only among events matching the compiled round's normalized token and wallet. Whether one provider event ID can conflict across unrelated wallets or tokens remains a low-priority provider question; broadening that rejection boundary without response-schema evidence could conflate unrelated identifier namespaces.

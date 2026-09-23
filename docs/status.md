@@ -1,20 +1,18 @@
 # Project status
 
-Current milestone: correction of the deterministic scoring findings reported against commit `db2f0b11eb3527cbb518acd8312138e8645be229`. The accepted offline skeleton remains recorded at commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`; its review is in `docs/reviews/825ddc5.md`.
+Current milestone: scoring normalization and coverage hardening accepted from Claude's re-review of `0d3994db0f294f3c39a3128cd366396d6961787d`. The re-review record is `docs/reviews/0d3994d.md`.
 
-## Scoring review correction: verified progress
+## Scoring re-review hardening: verified progress
 
-- The supplied review reported two blocking behaviors: unknown coverage states could pass as complete when they carried a sufficient range, and ambiguity detection ignored individually subthreshold legs whose transaction could be potentially material. Local reproductions also confirmed a case-only address mismatch could silently yield No trade, a duplicate conflict outside the scoring window was ignored, and malformed JSON-shaped input could throw.
-- Rules behavior is now version 2. Coverage status must be exactly `complete`; missing, malformed, unknown, explicitly incomplete, range-insufficient, contradictory, or unfinished evidence returns a typed unscorable reason.
-- `compileRound` now accepts and checks `unknown` input at runtime. The round and event addresses must have Ethereum address syntax and are compared in lowercase. This prevents case-only mismatches without claiming checksum, contract, or provider-format verification.
-- Matching event-ID conflicts are checked before time-window filtering. Failure selection is stable across event permutations.
-- Potentially material transaction ambiguity now considers every validated featured-token leg after exact deduplication. Summed nonnegative leg values are used only to trigger conservative ambiguity rejection; individual events still determine the answer and no provider netting or aggregation semantics are assumed.
-- A scorable result is explicitly private. A future public question serializer must omit wallet identity, transaction hashes, internal event IDs, answers, and outcome evidence.
-- The proposal's initial 10–40-day cutoff-selection rule is assigned to the future acquisition workflow. It is separate from the pure 48-hour scoring contract, and elapsed time does not prove provider completeness.
-- The synthetic suite now contains 26 offline tests, including exact `t0` tape isolation, one-millisecond coverage gaps, malformed runtime inputs, invalid fields, conflicts outside the scoring interval, case-only addresses, split and mixed-direction legs, ambiguity before/at/after a valid first action, and permutation-stable scorable and unscorable results.
-- Final pre-commit checks passed: `npm test` (26/26), `npm run lint` with zero warnings, `npm run typecheck`, and `git diff --check`. No production build was run for this documentation and rules correction.
+- Claude's re-review accepted both earlier blocking fixes: strict coverage discriminants and ambiguity detection across individually subthreshold transaction legs.
+- Rules behavior is now version 3. Every event must use exactly `ethereum`; transaction hashes require `0x` plus 64 hexadecimal characters and normalize to lowercase before deduplication or transaction grouping.
+- Coverage with missing or nonnumeric `observedAtMs` is unscorable. A claimed segment end later than `observedAtMs` is contradictory and unscorable.
+- Direct synthetic regressions cover exact `$2,500` combined legs, negative and nonnumeric USD values, empty identifiers, malformed event addresses and hashes, hash case normalization, non-Ethereum event chains, multiple conflicting IDs, and simultaneous ambiguous transactions across input permutations.
+- Future public questions must omit exact timestamps and USD values in addition to private identities, source IDs, answers, and evidence. They will use relative times and size bands, without claiming anonymity. No serializer was implemented.
+- The low-priority question of conflicting event IDs across unrelated wallets or tokens remains deferred pending provider identifier validation.
+- Final pre-commit checks passed: `npm test` (33/33), `npm run lint` with zero warnings, `npm run typecheck`, and `git diff --check`. The credential-pattern scan found no matches in the changed files; the dependency-boundary scan found no import, runtime, network, environment, framework, or database dependency in `lib/rules.ts`; `package.json` and `package-lock.json` are unchanged. No production build was run.
 
-The earlier version 1 status overstated coverage and ambiguity verification. Its 19 tests covered declared incomplete evidence and material multi-leg events, but did not exercise an unknown status with plausible ranges or subthreshold legs that combine to the material threshold. Those claims are superseded by this section and the review disposition in `docs/reviews/db2f0b1.md`.
+The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2's accepted re-review and the additional non-blocking recommendations are recorded in `docs/reviews/0d3994d.md`.
 
 ## Remaining scoring limitations
 
@@ -22,11 +20,11 @@ The earlier version 1 status overstated coverage and ambiguity verification. Its
 - Conservative invalid-value and combined-leg ambiguity handling may reject events a future validated schema can classify safely. Any relaxation requires a versioned decision and boundary tests.
 - Tests are invented internal-contract fixtures. They are not verified historical rounds, provider response fixtures, live-path evidence, or evidence of API completeness.
 - No public serializer, answer-leakage test, acquisition adapter, real historical data, Nansen integration, API route, persistence, spending guard, or deployment was added or verified.
-- Claude's re-review of the correction is pending and must not be recorded as complete until independently performed.
+- Claude independently re-reviewed `0d3994d`; the subsequent version 3 hardening commit has not yet been independently reviewed.
 
 ## Next proposed step
 
-Have Claude review the correction commit by hash, reproduce the two blockers, and independently check the new boundary and permutation tests. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
+Have Claude review the version 3 hardening commit by hash, focusing on hash normalization, chain rejection, temporal coverage consistency, and deterministic failure ordering. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
 
 ## Accepted offline skeleton history
 

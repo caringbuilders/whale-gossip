@@ -7,7 +7,7 @@
  * this module. See `docs/rules.md` for the adapter guarantees.
  */
 
-export const RULES_VERSION = "2";
+export const RULES_VERSION = "3";
 export const ETHEREUM_CHAIN = "ethereum";
 export const LOOKBACK_MS = 30 * 24 * 60 * 60 * 1_000;
 export const ANSWER_WINDOW_MS = 48 * 60 * 60 * 1_000;
@@ -17,6 +17,7 @@ export const ADMISSION_TRADE_MIN_USD = 25_000;
 export const VISIBLE_TAPE_LENGTH = 5;
 
 const ETHEREUM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const ETHEREUM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
 
 export type TradeAction = "buy" | "sell";
 export type Guess = TradeAction | "no-trade";
@@ -110,7 +111,6 @@ export type UnscorableReason =
       readonly segment: "lookback" | "answer-window";
       readonly detail: CoverageFailure | "range-mismatch";
     }
-  | { readonly code: "answer-window-unfinished" }
   | { readonly code: "invalid-event"; readonly eventId: string; readonly field: InvalidEventField }
   | { readonly code: "invalid-usd-value"; readonly eventId: string }
   | { readonly code: "conflicting-duplicate"; readonly eventId: string }
@@ -201,6 +201,14 @@ function canonicalAddress(value: string): string {
   return value.toLowerCase();
 }
 
+function isEthereumTransactionHash(value: string): boolean {
+  return ETHEREUM_TRANSACTION_HASH.test(value);
+}
+
+function canonicalTransactionHash(value: string): string {
+  return value.toLowerCase();
+}
+
 function invalidEvent(eventId: string, field: InvalidEventField): EventValidationFailure {
   const fieldIndex = EVENT_FIELD_ORDER.indexOf(field).toString().padStart(2, "0");
   return {
@@ -214,10 +222,10 @@ function parseEvent(value: unknown): NormalizedTradeEvent | EventValidationFailu
 
   const candidateId = typeof value.eventId === "string" ? value.eventId : "";
   if (typeof value.eventId !== "string" || value.eventId.trim() === "") return invalidEvent(candidateId, "eventId");
-  if (typeof value.chain !== "string" || value.chain.trim() === "") return invalidEvent(candidateId, "chain");
+  if (value.chain !== ETHEREUM_CHAIN) return invalidEvent(candidateId, "chain");
   if (typeof value.token !== "string" || !isEthereumAddress(value.token)) return invalidEvent(candidateId, "token");
   if (typeof value.wallet !== "string" || !isEthereumAddress(value.wallet)) return invalidEvent(candidateId, "wallet");
-  if (typeof value.transactionHash !== "string" || value.transactionHash.trim() === "") {
+  if (typeof value.transactionHash !== "string" || !isEthereumTransactionHash(value.transactionHash)) {
     return invalidEvent(candidateId, "transactionHash");
   }
   if (!isSafeInteger(value.occurredAtMs)) return invalidEvent(candidateId, "occurredAtMs");
@@ -229,7 +237,7 @@ function parseEvent(value: unknown): NormalizedTradeEvent | EventValidationFailu
     chain: value.chain,
     token: canonicalAddress(value.token),
     wallet: canonicalAddress(value.wallet),
-    transactionHash: value.transactionHash,
+    transactionHash: canonicalTransactionHash(value.transactionHash),
     occurredAtMs: value.occurredAtMs,
     action: value.action,
     usdValue: value.usdValue,
@@ -417,6 +425,14 @@ export function compileRound(input: unknown): RoundCompilationResult {
     return unscorable({ code: "coverage-invalid", segment: "root", detail: "malformed" });
   }
 
+  const observedAtMs = input.coverage.observedAtMs;
+  if ((lookbackCoverage.coverage as CompleteCoverage).toMsExclusive > observedAtMs) {
+    return unscorable({ code: "coverage-invalid", segment: "lookback", detail: "contradictory" });
+  }
+  if ((answerCoverage.coverage as CompleteCoverage).toMsExclusive > observedAtMs) {
+    return unscorable({ code: "coverage-invalid", segment: "answer-window", detail: "contradictory" });
+  }
+
   const lookbackRangeFailure = validateCoverageRange(
     lookbackCoverage.coverage as CompleteCoverage,
     "lookback",
@@ -431,10 +447,6 @@ export function compileRound(input: unknown): RoundCompilationResult {
     answerWindowEndMs,
   );
   if (answerRangeFailure) return answerRangeFailure;
-  if (input.coverage.observedAtMs < answerWindowEndMs) {
-    return unscorable({ code: "answer-window-unfinished" });
-  }
-
   const parsedEvents: NormalizedTradeEvent[] = [];
   const eventFailures: EventValidationFailure[] = [];
   for (const value of input.events) {

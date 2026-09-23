@@ -27,6 +27,11 @@ const WALLET = `0x${"b2".repeat(20)}`;
 const WALLET_CASE_VARIANT = `0x${"B2".repeat(20)}`;
 const OTHER_WALLET = `0x${"d4".repeat(20)}`;
 
+function transactionHash(seed: string): string {
+  const encoded = [...seed].map((character) => character.codePointAt(0)?.toString(16).padStart(2, "0") ?? "00").join("");
+  return `0x${encoded.padEnd(64, "0").slice(0, 64)}`;
+}
+
 function event(
   eventId: string,
   occurredAtMs: number,
@@ -39,7 +44,7 @@ function event(
     chain: "ethereum",
     token: TOKEN,
     wallet: WALLET,
-    transactionHash: `tx-${eventId}`,
+    transactionHash: transactionHash(eventId),
     occurredAtMs,
     action,
     usdValue,
@@ -106,11 +111,11 @@ test("synthetic Buy round uses the first material event from unsorted input", ()
     eventId: "first-buy",
     occurredAtMs: T0 + HOUR,
     usdValue: 2_500,
-    transactionHash: "tx-first-buy",
+    transactionHash: transactionHash("first-buy"),
   });
   assert.deepEqual(result.visibleTape.map((trade) => trade.eventId), ["tape-1", "tape-2", "tape-3", "tape-4", "tape-5"]);
   assert.ok(result.visibleTape.every((trade) => trade.occurredAtMs < T0), "visible tape must not contain post-cutoff clues");
-  assert.equal(result.rulesVersion, "2");
+  assert.equal(result.rulesVersion, "3");
 });
 
 test("synthetic Sell round is selected and scored", () => {
@@ -182,14 +187,25 @@ test("round compilation is Ethereum-only", () => {
   expectUnscorable(compileRound(input([], { chain: "base" })), "unsupported-chain");
 });
 
-test("wrong wallet, token, and chain events cannot determine the answer", () => {
+test("wrong wallet and token events cannot determine the answer", () => {
   const irrelevant = [
     event("wrong-wallet", T0, null, "sell", { wallet: OTHER_WALLET }),
     event("wrong-token", T0, 100_000, "sell", { token: OTHER_TOKEN }),
-    event("wrong-chain", T0, 100_000, "sell", { chain: "base" }),
   ];
   const result = requireScorable(compileRound(input([...irrelevant, event("matching-buy", T0 + HOUR, 3_000)])));
   assert.equal(result.answer.action, "buy");
+});
+
+test("every supplied event must use the exact normalized Ethereum chain", () => {
+  for (const chain of ["", "Ethereum", "eth", "base"]) {
+    const result = expectUnscorable(
+      compileRound(input([event(`wrong-chain-${chain}`, T0 + HOUR, 3_000, "buy", { chain })])),
+      "invalid-event",
+    );
+    if (result.status === "unscorable" && result.reason.code === "invalid-event") {
+      assert.equal(result.reason.field, "chain");
+    }
+  }
 });
 
 test("Ethereum addresses match case-insensitively and malformed round addresses are rejected", () => {
@@ -298,6 +314,69 @@ test("missing, malformed, unknown, and contradictory coverage cannot compile", (
   }
 });
 
+test("missing or non-numeric observation time cannot produce any answer", () => {
+  const answerCases: readonly (readonly NormalizedTradeEvent[])[] = [
+    [event("would-buy", T0 + HOUR, 3_000, "buy")],
+    [event("would-sell", T0 + HOUR, 3_000, "sell")],
+    [],
+  ];
+
+  for (const answerEvents of answerCases) {
+    const validCoverage = completeCoverage();
+    const withoutObservedAt = {
+      lookback: validCoverage.lookback,
+      answerWindow: validCoverage.answerWindow,
+    };
+    const malformedCoverage = { ...validCoverage, observedAtMs: "later" };
+
+    for (const coverage of [withoutObservedAt, malformedCoverage]) {
+      const result = expectUnscorable(compileRound({ ...input(answerEvents), coverage }), "coverage-invalid");
+      if (result.status === "unscorable" && result.reason.code === "coverage-invalid") {
+        assert.deepEqual(result.reason, { code: "coverage-invalid", segment: "root", detail: "malformed" });
+      }
+    }
+  }
+});
+
+test("coverage cannot claim data later than its observation time", () => {
+  const observedAtMs = T0 + ANSWER_WINDOW_MS;
+  const cases = [
+    {
+      segment: "lookback",
+      coverage: completeCoverage({
+        observedAtMs,
+        lookback: {
+          status: "complete",
+          fromMs: T0 - LOOKBACK_MS,
+          toMsExclusive: observedAtMs + 1,
+        },
+      }),
+    },
+    {
+      segment: "answer-window",
+      coverage: completeCoverage({
+        observedAtMs,
+        answerWindow: {
+          status: "complete",
+          fromMs: T0,
+          toMsExclusive: observedAtMs + 1,
+        },
+      }),
+    },
+  ] as const;
+
+  for (const item of cases) {
+    const result = expectUnscorable(compileRound(input([], { coverage: item.coverage })), "coverage-invalid");
+    if (result.status === "unscorable" && result.reason.code === "coverage-invalid") {
+      assert.deepEqual(result.reason, {
+        code: "coverage-invalid",
+        segment: item.segment,
+        detail: "contradictory",
+      });
+    }
+  }
+});
+
 test("coverage ending or starting one millisecond inside a required window is insufficient", () => {
   const answerEndsEarly = compileRound(
     input([], {
@@ -324,14 +403,21 @@ test("coverage ending or starting one millisecond inside a required window is in
   }
 });
 
-test("an unfinished answer window is unscorable even when coverage claims completeness", () => {
+test("a claimed complete answer window observed too early is contradictory", () => {
   const result = compileRound(
     input([], { coverage: completeCoverage({ observedAtMs: T0 + ANSWER_WINDOW_MS - 1 }) }),
   );
-  expectUnscorable(result, "answer-window-unfinished");
+  const rejected = expectUnscorable(result, "coverage-invalid");
+  if (rejected.status === "unscorable" && rejected.reason.code === "coverage-invalid") {
+    assert.deepEqual(rejected.reason, {
+      code: "coverage-invalid",
+      segment: "answer-window",
+      detail: "contradictory",
+    });
+  }
 });
 
-test("relevant null and invalid USD values fail closed", () => {
+test("relevant null, non-finite, and negative USD values fail closed", () => {
   expectUnscorable(
     compileRound(input([event("null-answer", T0 + HOUR, null), event("later-valid", T0 + 2 * HOUR, 3_000)])),
     "invalid-usd-value",
@@ -339,6 +425,33 @@ test("relevant null and invalid USD values fail closed", () => {
 
   const invalidLookback = [...baseLookback(), event("nan-lookback", T0 - HOUR, Number.NaN)];
   expectUnscorable(compileRound(input([], { events: invalidLookback })), "invalid-usd-value");
+
+  expectUnscorable(compileRound(input([event("negative-answer", T0 + HOUR, -0.01)])), "invalid-usd-value");
+});
+
+test("empty identifiers, malformed addresses and hashes, and non-numeric USD are invalid events", () => {
+  const valid = event("candidate", T0 + HOUR, 3_000);
+  const cases: Array<{ candidate: unknown; field: string }> = [
+    { candidate: { ...valid, eventId: "" }, field: "eventId" },
+    { candidate: { ...valid, chain: "" }, field: "chain" },
+    { candidate: { ...valid, token: "0x1234" }, field: "token" },
+    { candidate: { ...valid, wallet: "not-an-address" }, field: "wallet" },
+    { candidate: { ...valid, transactionHash: "" }, field: "transactionHash" },
+    { candidate: { ...valid, transactionHash: "   " }, field: "transactionHash" },
+    { candidate: { ...valid, transactionHash: "0x1234" }, field: "transactionHash" },
+    { candidate: { ...valid, transactionHash: undefined }, field: "transactionHash" },
+    { candidate: { ...valid, usdValue: "3000" }, field: "usdValue" },
+  ];
+
+  for (const item of cases) {
+    const result = expectUnscorable(
+      compileRound({ ...input(), events: [...baseLookback(), item.candidate] }),
+      "invalid-event",
+    );
+    if (result.status === "unscorable" && result.reason.code === "invalid-event") {
+      assert.equal(result.reason.field, item.field);
+    }
+  }
 });
 
 test("malformed JSON-shaped inputs and event fields return typed failures without throwing", () => {
@@ -375,6 +488,35 @@ test("identical records are deduplicated", () => {
   assert.equal(result.answer.action === "buy" ? result.answer.eventId : null, "duplicate-buy");
 });
 
+test("valid transaction hashes normalize to lowercase before deduplication and grouping", () => {
+  const lowercaseHash = transactionHash("case-normalized-hash");
+  const uppercaseHash = `0x${lowercaseHash.slice(2).toUpperCase()}`;
+  const duplicate = event("case-duplicate", T0 + HOUR, 3_000, "buy", { transactionHash: uppercaseHash });
+  const deduplicated = requireScorable(
+    compileRound(input([duplicate, { ...duplicate, transactionHash: lowercaseHash }])),
+  );
+  assert.deepEqual(deduplicated.answer, {
+    action: "buy",
+    eventId: "case-duplicate",
+    occurredAtMs: T0 + HOUR,
+    usdValue: 3_000,
+    transactionHash: lowercaseHash,
+  });
+
+  const grouped = expectUnscorable(
+    compileRound(
+      input([
+        event("case-leg-a", T0 + HOUR, 1_250, "buy", { transactionHash: uppercaseHash }),
+        event("case-leg-b", T0 + HOUR, 1_250, "sell", { transactionHash: lowercaseHash }),
+      ]),
+    ),
+    "ambiguous-potentially-material-transaction",
+  );
+  if (grouped.status === "unscorable" && grouped.reason.code === "ambiguous-potentially-material-transaction") {
+    assert.equal(grouped.reason.transactionHash, lowercaseHash);
+  }
+});
+
 test("conflicting records that reuse an event ID are unscorable", () => {
   const first = event("conflict", T0 + HOUR, 2_500);
   const second = { ...first, action: "sell" as const };
@@ -391,12 +533,48 @@ test("conflicting matching duplicate IDs are rejected before window filtering", 
   }
 });
 
+test("multiple conflicting IDs choose the same failure across input permutations", () => {
+  const aFirst = event("a-conflict", T0 + HOUR, 3_000);
+  const aSecond = { ...aFirst, action: "sell" as const };
+  const zFirst = event("z-conflict", T0 + 2 * HOUR, 4_000);
+  const zSecond = { ...zFirst, usdValue: 5_000 };
+  const conflicts = [aFirst, aSecond, zFirst, zSecond];
+  const expected = {
+    status: "unscorable",
+    reason: { code: "conflicting-duplicate", eventId: "a-conflict" },
+  } as const;
+
+  assert.deepEqual(compileRound(input(conflicts)), expected);
+  assert.deepEqual(compileRound(input(conflicts.toReversed())), expected);
+  assert.deepEqual(compileRound(input([zFirst, aSecond, zSecond, aFirst])), expected);
+});
+
 test("distinct transaction legs are preserved and make the first event ambiguous", () => {
+  const sharedTransaction = transactionHash("shared-transaction");
   const legs = [
-    event("leg-a", T0 + HOUR, 3_000, "buy", { transactionHash: "shared-transaction" }),
-    event("leg-b", T0 + HOUR, 4_000, "sell", { transactionHash: "shared-transaction" }),
+    event("leg-a", T0 + HOUR, 3_000, "buy", { transactionHash: sharedTransaction }),
+    event("leg-b", T0 + HOUR, 4_000, "sell", { transactionHash: sharedTransaction }),
   ];
   expectUnscorable(compileRound(input(legs)), "ambiguous-potentially-material-transaction");
+});
+
+test("simultaneous ambiguous transactions choose the same hash across input permutations", () => {
+  const lowerHash = `0x${"1".repeat(64)}`;
+  const higherHash = `0x${"f".repeat(64)}`;
+  const ambiguous = [
+    event("higher-a", T0 + HOUR, 1_250, "buy", { transactionHash: higherHash }),
+    event("higher-b", T0 + HOUR, 1_250, "sell", { transactionHash: higherHash }),
+    event("lower-a", T0 + HOUR, 1_250, "buy", { transactionHash: lowerHash }),
+    event("lower-b", T0 + HOUR, 1_250, "sell", { transactionHash: lowerHash }),
+  ];
+  const expected = {
+    status: "unscorable",
+    reason: { code: "ambiguous-potentially-material-transaction", transactionHash: lowerHash },
+  } as const;
+
+  assert.deepEqual(compileRound(input(ambiguous)), expected);
+  assert.deepEqual(compileRound(input(ambiguous.toReversed())), expected);
+  assert.deepEqual(compileRound(input([ambiguous[2], ambiguous[0], ambiguous[3], ambiguous[1]])), expected);
 });
 
 test("tied earliest material events in different transactions are unscorable", () => {
@@ -404,44 +582,50 @@ test("tied earliest material events in different transactions are unscorable", (
   expectUnscorable(compileRound(input(tied)), "tied-first-events");
 });
 
-test("split buys and mixed-direction subthreshold legs conservatively trigger ambiguity", () => {
+test("combined legs totalling exactly $2,500 and mixed directions conservatively trigger ambiguity", () => {
+  const splitBuyTransaction = transactionHash("split-buy");
   const splitBuys = [
-    event("split-buy-a", T0 + HOUR, 1_300, "buy", { transactionHash: "split-buy" }),
-    event("split-buy-b", T0 + HOUR, 1_300, "buy", { transactionHash: "split-buy" }),
+    event("split-buy-a", T0 + HOUR, 1_250, "buy", { transactionHash: splitBuyTransaction }),
+    event("split-buy-b", T0 + HOUR, 1_250, "buy", { transactionHash: splitBuyTransaction }),
   ];
   expectUnscorable(compileRound(input(splitBuys)), "ambiguous-potentially-material-transaction");
 
+  const mixedTransaction = transactionHash("mixed");
   const mixed = [
-    event("mixed-a", T0 + HOUR, 1_300, "buy", { transactionHash: "mixed" }),
-    event("mixed-b", T0 + HOUR, 1_300, "sell", { transactionHash: "mixed" }),
+    event("mixed-a", T0 + HOUR, 1_300, "buy", { transactionHash: mixedTransaction }),
+    event("mixed-b", T0 + HOUR, 1_300, "sell", { transactionHash: mixedTransaction }),
   ];
   expectUnscorable(compileRound(input(mixed)), "ambiguous-potentially-material-transaction");
 
+  const smallTransaction = transactionHash("small");
   const belowTrigger = [
-    event("small-a", T0 + HOUR, 1_200, "buy", { transactionHash: "small" }),
-    event("small-b", T0 + HOUR, 1_299.99, "sell", { transactionHash: "small" }),
+    event("small-a", T0 + HOUR, 1_200, "buy", { transactionHash: smallTransaction }),
+    event("small-b", T0 + HOUR, 1_299.99, "sell", { transactionHash: smallTransaction }),
   ];
   assert.deepEqual(requireScorable(compileRound(input(belowTrigger))).answer, { action: "no-trade" });
 });
 
 test("ambiguity before or at the first material event rejects, while later ambiguity cannot change it", () => {
+  const beforeTransaction = transactionHash("before");
   const before = [
-    event("before-a", T0 + HOUR, 1_300, "buy", { transactionHash: "before" }),
-    event("before-b", T0 + HOUR, 1_300, "sell", { transactionHash: "before" }),
+    event("before-a", T0 + HOUR, 1_300, "buy", { transactionHash: beforeTransaction }),
+    event("before-b", T0 + HOUR, 1_300, "sell", { transactionHash: beforeTransaction }),
     event("valid-later", T0 + 2 * HOUR, 3_000, "buy"),
   ];
   expectUnscorable(compileRound(input(before)), "ambiguous-potentially-material-transaction");
 
+  const atFirstTransaction = transactionHash("at-first");
   const atFirst = [
-    event("first-material-leg", T0 + HOUR, 2_500, "sell", { transactionHash: "at-first" }),
-    event("first-small-leg", T0 + HOUR, 100, "buy", { transactionHash: "at-first" }),
+    event("first-material-leg", T0 + HOUR, 2_500, "sell", { transactionHash: atFirstTransaction }),
+    event("first-small-leg", T0 + HOUR, 100, "buy", { transactionHash: atFirstTransaction }),
   ];
   expectUnscorable(compileRound(input(atFirst)), "ambiguous-potentially-material-transaction");
 
+  const afterTransaction = transactionHash("after");
   const after = [
     event("valid-first", T0 + HOUR, 3_000, "sell"),
-    event("after-a", T0 + 2 * HOUR, 1_300, "buy", { transactionHash: "after" }),
-    event("after-b", T0 + 2 * HOUR, 1_300, "sell", { transactionHash: "after" }),
+    event("after-a", T0 + 2 * HOUR, 1_300, "buy", { transactionHash: afterTransaction }),
+    event("after-b", T0 + 2 * HOUR, 1_300, "sell", { transactionHash: afterTransaction }),
   ];
   const accepted = requireScorable(compileRound(input(after)));
   assert.equal(accepted.answer.action, "sell");

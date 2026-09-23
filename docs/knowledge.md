@@ -88,4 +88,14 @@ The proposal's initial 10–40-day cutoff range belongs to candidate selection i
 
 Compiled scoring results must remain private because they contain wallet identity, transaction hashes, event IDs, answers, and evidence. A future public question serializer needs an explicit allowlist plus leakage tests for rendered HTML, RSC payloads, API responses, and client state.
 
-The correction suite uses syntactically valid invented Ethereum addresses and exercises order-independent results. The fixtures still provide no evidence about actual provider identifiers, casing, multi-leg behavior, or completeness signals. Claude's re-review of the correction remains pending.
+The correction suite uses syntactically valid invented Ethereum addresses and exercises order-independent results. The fixtures still provide no evidence about actual provider identifiers, casing, multi-leg behavior, or completeness signals. Claude's re-review was pending at that checkpoint; its outcome is recorded below and in `docs/reviews/0d3994d.md`.
+
+## Scoring re-review hardening knowledge — September 23, 2026
+
+Ethereum transaction hashes are now checked only for deterministic syntax and normalized casing. This does not prove a transaction exists, that Nansen always supplies a transaction hash, or that its rows use one hash consistently across swap legs and pagination. Those remain provider-contract questions.
+
+The single-chain compiler rejects every event whose chain is not exactly `ethereum`, even when its wallet or token does not match the round. The future adapter must normalize aliases before compilation and pass only Ethereum events. The stricter boundary prevents an unexpected chain value from being silently discarded and turning a possible data-shape problem into No trade.
+
+Coverage end times must not exceed the recorded observation time. This is internal consistency validation, not proof that all pages were fetched or that the retrieval clock and upstream data were complete.
+
+Public relative times and size bands reduce direct lookup clues, but a distinctive sequence can still be correlated with public chain history. No serializer or anonymity test exists yet. Duplicate-ID conflicts across unrelated token or wallet identities remain deferred until the provider's identifier namespace is known.

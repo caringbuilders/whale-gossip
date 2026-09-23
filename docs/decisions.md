@@ -67,3 +67,13 @@ Duplicate conflicts among matching events are checked before scoring-window filt
 Candidate acquisition and pure scoring have separate responsibilities. The future acquisition workflow enforces the proposal's initial cutoff selection of 10–40 days before retrieval and establishes pagination evidence. The compiler applies the 30-day lookback and 48-hour answer window to a supplied `t0`. Neither a ten-day delay nor an event array establishes complete provider coverage.
 
 Compiled rounds are private records. The future public question serializer must use an allowlist that omits wallet identity, transaction hashes, internal event IDs, the answer, and outcome evidence. Provider normalization, public serialization, and their integration tests remain future milestones.
+
+## Scoring normalization hardening — September 23, 2026
+
+Rules version 3 requires every supplied event to use the exact normalized chain `ethereum`. Transaction hashes must have Ethereum syntax (`0x` plus 64 hexadecimal characters) and are lowercased before exact-duplicate checks and transaction grouping. These checks establish deterministic internal syntax only; transaction existence, provider formatting, and leg semantics remain unverified.
+
+Coverage evidence is contradictory when either claimed segment end is later than `observedAtMs`. Missing and nonnumeric observation times remain malformed coverage. These conditions cannot produce Buy, Sell, or No trade.
+
+Public question serialization remains future work. Its allowlist must omit wallet identity, source identifiers, answers, outcome evidence, exact USD values, and exact event/window timestamps. Public clues will use relative times and reviewed size bands. This reduces direct transaction lookup but cannot promise anonymity against public chain analysis.
+
+Duplicate-ID conflicts remain scoped to events matching the compiled round's token and wallet. Conflicts across unrelated identities stay deferred until provider identifier namespaces are validated; rejecting them now could conflate unrelated records.
