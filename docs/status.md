@@ -1,6 +1,6 @@
 # Project status
 
-Current milestone: offline application skeleton, prepared for the local commit `feat: scaffold offline Whale Gossip app`. Use Git history for its resulting hash. The previous foundation commit is `0a5e1f2700f831089f37cc072597ab0de3b866ea`; it was pushed to the configured origin before this milestone. This milestone must not be pushed yet.
+Current milestone: offline application skeleton accepted after independent review of commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`. Claude reported no blocking findings. The detailed evidence boundary is recorded in `docs/reviews/825ddc5.md`.
 
 ## Offline skeleton: verified progress
 
@@ -13,20 +13,21 @@ Current milestone: offline application skeleton, prepared for the local commit `
 - Source review found no application fetch calls, external URLs, environment access, client components, authentication, API routes, or database connections. npm scripts disable Next.js telemetry; fonts and styling are local/system resources. No Nansen requests or other live data retrieval were performed.
 - Reviewed the two Server Components using the React skill checklist: no hooks or client state, semantic headings/landmarks, a keyboard-focusable in-page link, and responsive CSS. No claim of browser accessibility or visual testing is made.
 - `git diff --check` passed and the proposal/instruction files were confirmed unchanged.
+- Claude independently reviewed the named scaffold commit and accepted it with no blocking findings. Claude's HTML/static inspection found no external references or application fetch calls; runtime network behavior was not verified through a browser network capture. Build, lint, type-check, and loopback HTTP results remain Codex-reported checks that Claude did not repeat.
 
 ## Remaining skeleton limitations
 
 - Visual, browser-console, keyboard, and mobile viewport verification remain pending: no browser automation tool or browser binary was available. The HTTP check is not a browser test.
 - npm marks ESLint 9.39.5 as deprecated. It is retained because the installed Next.js lint plugins declare peer support through ESLint 9; ESLint 10 produced peer conflicts. TypeScript 7 was also rejected by the lint tooling; TypeScript 6 passes the checks. Revisit tooling compatibility when upstream plugins support newer releases.
 - npm reported an unapproved `unrs-resolver` postinstall script. It was not enabled; lint, type checking, and build passed without approving it.
-- No game rules module, fixtures, guess/reveal flow, live integration, hosted persistence, spend guard, or deployment is implemented. No gameplay tests or live verification were performed. Independent Claude review is pending.
+- No game rules module, fixtures, guess/reveal flow, live integration, hosted persistence, spend guard, or deployment is implemented. No gameplay tests or live verification were performed.
 - No clean-clone installation timing or browser network trace was performed.
 
 ## View locally and next proposed step
 
 From `/home/aitooluse/work/hackathons/whale-gossip`, run `npm run dev` and open **http://localhost:3000**. Use `npm ci` first on a fresh checkout. The development server binds to loopback. For the built version, use `npm start` instead.
 
-Next, review this milestone and visually check desktop/mobile rendering. A subsequent bounded task can implement pure scoring rules with explicitly synthetic boundary fixtures and meaningful offline tests, without enabling live acquisition.
+The next milestone is a pure deterministic scoring-rules module with explicitly synthetic offline boundary fixtures and meaningful tests. The fixtures must be clearly labelled synthetic and cannot count as real rounds or live evidence. Real historical data, Nansen integration, hosted persistence, spend controls, and deployment remain pending. Browser visual and runtime-network verification of the accepted skeleton also remain open.
 
 ## Foundation milestone history (September 22, 2026)
 

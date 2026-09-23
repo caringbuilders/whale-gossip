@@ -38,7 +38,7 @@ Recheck official competition rules, call eligibility, deadlines, submission link
 
 ## Future infrastructure verification
 
-The local author identity is configured for the foundation checkpoint. The GitHub remote is connected; this application milestone is local only and must not be pushed yet. Later verify Vercel/Supabase project linkage, secret storage, private table grants/RLS/function privileges, shared budget reservations under concurrency, idempotency, and fail-closed storage behavior. No hosted resources or controls have been verified by this documentation setup.
+The local author identity is configured for project checkpoints. The GitHub remote is connected, and local `main` tracks `origin/main`. Later verify Vercel/Supabase project linkage, secret storage, private table grants/RLS/function privileges, shared budget reservations under concurrency, idempotency, and fail-closed storage behavior. No hosted resources or controls have been verified by this documentation setup.
 
 Private acquisition artifacts belong under ignored `data/` paths (for example `data/private/`, `data/raw/`, `data/cache/`, and `data/ledgers/`) or `private/`. Only `data/sample-deck.json` and `data/fixtures/` are allowed through the data ignore rule, and require explicit review before staging. Ignore rules do not inspect content or protect files force-added to Git.
 
@@ -51,3 +51,9 @@ No `agent-browser` executable, connected browser tool, Chromium/Firefox executab
 Installed versions: Next.js 16.3.6, React/React DOM 19.3.0, TypeScript 6.0.3, ESLint 9.39.5. ESLint 9 is deprecated but currently matches bundled lint-plugin peer requirements; TypeScript 7 is unsupported by the installed lint tooling. The production build required execution outside the sandbox for Next.js to capture its TypeScript subprocess output. Standalone type checking passed inside the sandbox. npm reported an unapproved `unrs-resolver` postinstall script; no approval was needed for the checks that passed.
 
 The [official Next.js installation documentation](https://nextjs.org/docs/app/getting-started/installation) and npm package metadata were consulted during setup. No provider data endpoints were queried.
+
+## AI Playbook lesson — transfer later
+
+**Marked for later transfer to the shared AI Playbook.** Review a named commit or immutable diff so the implementation under review is unambiguous. In the review record, separate checks the reviewer independently performed from checks reported in the implementation handoff but not repeated. Phrase evidence at its actual level: HTML/static inspection can establish that source contains no external references or application fetch calls, but it cannot establish runtime network behavior without a browser network capture.
+
+Avoid running `next build` against the same `.next` directory while `next dev` is running. Both processes write framework artifacts there, so concurrent use can produce misleading failures or corrupt the verification state. Stop the development server before a production build, or use separate working directories/build directories when concurrent execution is unavoidable.
