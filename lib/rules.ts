@@ -7,7 +7,7 @@
  * this module. See `docs/rules.md` for the adapter guarantees.
  */
 
-export const RULES_VERSION = "3";
+export const RULES_VERSION = "4";
 export const ETHEREUM_CHAIN = "ethereum";
 export const LOOKBACK_MS = 30 * 24 * 60 * 60 * 1_000;
 export const ANSWER_WINDOW_MS = 48 * 60 * 60 * 1_000;
@@ -474,7 +474,13 @@ export function compileRound(input: unknown): RoundCompilationResult {
     (event) => event.occurredAtMs >= lookbackStartMs && event.occurredAtMs < answerWindowEndMs,
   );
   const invalidValueEvents = relevantEvents
-    .filter((event) => event.usdValue === null || !Number.isFinite(event.usdValue) || (event.usdValue as number) < 0)
+    .filter(
+      (event) =>
+        event.usdValue === null ||
+        !Number.isFinite(event.usdValue) ||
+        (event.usdValue as number) < 0 ||
+        Object.is(event.usdValue, -0),
+    )
     .sort(byTimeThenId);
   if (invalidValueEvents.length > 0) {
     return unscorable({ code: "invalid-usd-value", eventId: invalidValueEvents[0].eventId });

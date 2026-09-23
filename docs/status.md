@@ -1,8 +1,17 @@
 # Project status
 
-Current milestone: scoring normalization and coverage hardening accepted from Claude's re-review of `0d3994db0f294f3c39a3128cd366396d6961787d`. The re-review record is `docs/reviews/0d3994d.md`.
+Current milestone: signed-zero validation correction accepted from Grok's static review of `bde341009c335af7e357adbb71255a340df0975c`. The review record is `docs/reviews/bde3410-grok.md`.
 
-## Scoring re-review hardening: verified progress
+## Grok signed-zero review disposition
+
+- Grok 4.7 at High effort reported no blocking findings and one definite non-blocking issue: numeric `-0` bypassed the ordinary negative-value comparison.
+- Rules version 4 rejects `Object.is(usdValue, -0)` through the existing typed `invalid-usd-value` result.
+- Two focused synthetic tests cover signed zero in an otherwise valid lookback/answer candidate and as the only answer-window event in an otherwise valid No trade candidate.
+- This was a static review. Grok did not independently run tests, lint, type checking, Git status, provider behavior, or live integration.
+- Grok supplied a distinct third-model finding after the Codex implementation and Claude review cycle. This is useful evidence for this milestone, not a decision that every future change requires three-model review.
+- Final pre-commit checks passed: `npm test` (35/35), `npm run lint` with zero warnings, `npm run typecheck`, and `git diff --check`. The credential-pattern and dependency-boundary scans passed, and dependency manifests are unchanged. No production build was run.
+
+## Prior scoring re-review hardening: verified progress
 
 - Claude's re-review accepted both earlier blocking fixes: strict coverage discriminants and ambiguity detection across individually subthreshold transaction legs.
 - Rules behavior is now version 3. Every event must use exactly `ethereum`; transaction hashes require `0x` plus 64 hexadecimal characters and normalize to lowercase before deduplication or transaction grouping.
@@ -24,7 +33,7 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 
 ## Next proposed step
 
-Have Claude review the version 3 hardening commit by hash, focusing on hash normalization, chain rejection, temporal coverage consistency, and deterministic failure ordering. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
+Review the version 4 signed-zero correction by commit if another independent check is warranted. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
 
 ## Accepted offline skeleton history
 

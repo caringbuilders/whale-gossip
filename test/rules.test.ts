@@ -115,7 +115,7 @@ test("synthetic Buy round uses the first material event from unsorted input", ()
   });
   assert.deepEqual(result.visibleTape.map((trade) => trade.eventId), ["tape-1", "tape-2", "tape-3", "tape-4", "tape-5"]);
   assert.ok(result.visibleTape.every((trade) => trade.occurredAtMs < T0), "visible tape must not contain post-cutoff clues");
-  assert.equal(result.rulesVersion, "3");
+  assert.equal(result.rulesVersion, "4");
 });
 
 test("synthetic Sell round is selected and scored", () => {
@@ -427,6 +427,34 @@ test("relevant null, non-finite, and negative USD values fail closed", () => {
   expectUnscorable(compileRound(input([], { events: invalidLookback })), "invalid-usd-value");
 
   expectUnscorable(compileRound(input([event("negative-answer", T0 + HOUR, -0.01)])), "invalid-usd-value");
+});
+
+test("negative zero in the lookback is an invalid USD value", () => {
+  const result = expectUnscorable(
+    compileRound(
+      input([], {
+        events: [
+          ...baseLookback(),
+          event("signed-zero-lookback", T0 - HOUR, -0),
+          event("otherwise-valid-answer", T0 + HOUR, 3_000, "buy"),
+        ],
+      }),
+    ),
+    "invalid-usd-value",
+  );
+  if (result.status === "unscorable" && result.reason.code === "invalid-usd-value") {
+    assert.equal(result.reason.eventId, "signed-zero-lookback");
+  }
+});
+
+test("negative zero as the only answer-window event cannot become No trade", () => {
+  const result = expectUnscorable(
+    compileRound(input([event("signed-zero-answer", T0 + HOUR, -0)])),
+    "invalid-usd-value",
+  );
+  if (result.status === "unscorable" && result.reason.code === "invalid-usd-value") {
+    assert.equal(result.reason.eventId, "signed-zero-answer");
+  }
 });
 
 test("empty identifiers, malformed addresses and hashes, and non-numeric USD are invalid events", () => {

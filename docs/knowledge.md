@@ -99,3 +99,9 @@ The single-chain compiler rejects every event whose chain is not exactly `ethere
 Coverage end times must not exceed the recorded observation time. This is internal consistency validation, not proof that all pages were fetched or that the retrieval clock and upstream data were complete.
 
 Public relative times and size bands reduce direct lookup clues, but a distinctive sequence can still be correlated with public chain history. No serializer or anonymity test exists yet. Duplicate-ID conflicts across unrelated token or wallet identities remain deferred until the provider's identifier namespace is known.
+
+## Grok review lesson — September 23, 2026
+
+Grok 4.7 at High effort independently noticed that numeric negative zero bypasses an ordinary `< 0` validation. JavaScript preserves the sign bit for `-0` while most comparisons treat it as zero, so signed zero requires `Object.is(value, -0)` when the normalized contract rejects every negative representation.
+
+This was a useful distinct finding from a third model after Codex implementation and Claude review. One useful result does not establish a standing requirement for three-model review; reviewer choice should remain proportional to milestone risk and unresolved questions. The static Grok review did not validate provider behavior or execute the repository checks.

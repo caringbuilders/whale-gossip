@@ -2,7 +2,7 @@
 
 `lib/rules.ts` is a pure offline rules module. Its normalized event interface is **provisional** until actual Nansen token DEX responses and provider semantics are validated. The module performs no network, database, environment-variable, or UI work.
 
-Rule behavior is versioned. Version 3 retains the version 2 coverage and ambiguity fixes and adds strict Ethereum event-chain and transaction-hash normalization plus stronger temporal consistency for coverage evidence.
+Rule behavior is versioned. Version 4 retains the version 3 normalization and coverage rules and rejects numeric negative zero as an invalid USD value.
 
 ## Window and threshold conventions
 
@@ -30,7 +30,7 @@ Every transaction hash must be `0x` followed by exactly 64 hexadecimal character
 
 Coverage is mandatory for the lookback and answer window. Each segment must have status exactly `complete`, a valid half-open range covering the full required interval, and no contradictory failure fields. Missing, malformed, unknown, explicitly incomplete, insufficient, or contradictory evidence is unscorable. `observedAtMs` must be a safe integer at or after the answer-window end, and neither claimed coverage end may be later than `observedAtMs`. An event array, an empty result, elapsed time, or a ten-day-old cutoff cannot establish completeness.
 
-A null, non-finite, or negative USD value on a matching event inside either required window is conservatively relevant and makes the round unscorable. This may reject some events a future validated schema could safely exclude, but it cannot silently create No trade or change the visible tape.
+A null, non-finite, negative, or numeric negative-zero USD value on a matching event inside either required window is conservatively relevant and makes the round unscorable. Negative zero is detected with `Object.is(usdValue, -0)` because ordinary less-than comparison treats it like zero. This may reject some events a future validated schema could safely exclude, but it cannot silently create No trade or change the visible tape.
 
 All event records are structurally validated before scoring. When several invalid events exist, failure selection uses a fixed field priority and stable event-ID ordering. Relevant invalid USD failures use chronological ordering followed by stable event ID. This makes the selected reason independent of input order.
 
