@@ -1,15 +1,16 @@
 # Project status
 
-Current milestone: signed-zero validation correction accepted from Grok's static review of `bde341009c335af7e357adbb71255a340df0975c`. The review record is `docs/reviews/bde3410-grok.md`.
+Current milestone: deterministic scoring rules version 4 are accepted after Codex implementation, Claude review, Grok independent static review, Codex correction, and Claude targeted approval of `48d1218664ea61288c546fd26fff3e565c7d115f`. The final approval is recorded in `docs/reviews/48d1218.md`.
 
-## Grok signed-zero review disposition
+## Accepted deterministic scoring rules version 4
 
 - Grok 4.7 at High effort reported no blocking findings and one definite non-blocking issue: numeric `-0` bypassed the ordinary negative-value comparison.
 - Rules version 4 rejects `Object.is(usdValue, -0)` through the existing typed `invalid-usd-value` result.
 - Two focused synthetic tests cover signed zero in an otherwise valid lookback/answer candidate and as the only answer-window event in an otherwise valid No trade candidate.
 - This was a static review. Grok did not independently run tests, lint, type checking, Git status, provider behavior, or live integration.
 - Grok supplied a distinct third-model finding after the Codex implementation and Claude review cycle. This is useful evidence for this milestone, not a decision that every future change requires three-model review.
-- Final pre-commit checks passed: `npm test` (35/35), `npm run lint` with zero warnings, `npm run typecheck`, and `git diff --check`. The credential-pattern and dependency-boundary scans passed, and dependency manifests are unchanged. No production build was run.
+- **Codex verification:** before commit `48d1218`, `npm test` passed 35/35, `npm run lint` passed with zero warnings, `npm run typecheck` passed, and `git diff --check` passed. The credential-pattern and dependency-boundary scans passed, and dependency manifests were unchanged. Codex did not run a production build.
+- **Claude targeted approval:** Claude Sonnet 5 at Medium effort independently ran the 35 tests, type checking, a commit-range diff check, and focused signed-zero/ordinary-zero probes. Claude reported no blocking findings and approved the correction for push. Claude did not independently run lint or a production build.
 
 ## Prior scoring re-review hardening: verified progress
 
@@ -29,11 +30,11 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 - Conservative invalid-value and combined-leg ambiguity handling may reject events a future validated schema can classify safely. Any relaxation requires a versioned decision and boundary tests.
 - Tests are invented internal-contract fixtures. They are not verified historical rounds, provider response fixtures, live-path evidence, or evidence of API completeness.
 - No public serializer, answer-leakage test, acquisition adapter, real historical data, Nansen integration, API route, persistence, spending guard, or deployment was added or verified.
-- Claude independently re-reviewed `0d3994d`; the subsequent version 3 hardening commit has not yet been independently reviewed.
+- Version 4 is accepted as an offline deterministic scoring milestone. Production build behavior, provider behavior, live integration, persistence, UI integration, and public serialization remain unverified.
 
 ## Next proposed step
 
-Review the version 4 signed-zero correction by commit if another independent check is warranted. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
+Integrate a five-round offline game using explicitly synthetic fixtures and an enforced private/public serialization boundary. Public questions must exclude the private fields listed in `docs/rules.md`; answers and evidence remain private until reveal. Live Nansen retrieval remains disabled. Real historical acquisition and live integration require a later, separately authorized bounded milestone.
 
 ## Accepted offline skeleton history
 
