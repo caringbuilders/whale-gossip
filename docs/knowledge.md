@@ -14,19 +14,31 @@
 | Git identity / remotes | User-supplied name and email configured locally; origin is `https://github.com/caringbuilders/whale-gossip.git` |
 | Initial project files | Proposal and its `:Zone.Identifier` sidecar; requested documentation did not exist |
 
-The proposal specifies Windows with WSL2/Ubuntu and VS Code, GitHub as canonical source, and Codespaces as fallback. The kernel supports the WSL2 observation; the Linux distribution, editor, and fallback availability were not checked. The foundation commit was pushed to origin in the preceding milestone; local `main` tracks `origin/main`. GitHub authentication was verified then without displaying credentials. No Nansen credentials were read or tested. Node support status and deployment runtime parity have not been independently validated.
+The proposal specifies Windows with WSL2/Ubuntu and VS Code, GitHub as canonical source, and Codespaces as fallback. The kernel supports the WSL2 observation; the Linux distribution, editor, and fallback availability were not checked. The foundation commit was pushed to origin in the preceding milestone; local `main` tracks `origin/main`. GitHub authentication was verified then without displaying credentials. The later bounded contract spike used the local Nansen credential without displaying it or reading it into documentation. Node support status and deployment runtime parity have not been independently validated.
 
-## Nansen questions requiring a bounded live contract check
+## Bounded Nansen contract evidence — September 23, 2026
+
+Official documentation checked for the spike specifies the lowercase `apikey` header, the `chain`/`token_address`/`date` request fields, `page`/`per_page` pagination, ascending `block_timestamp` ordering, and one-credit pricing for `tgm/dex-trades`. The live result reported both cost and use as one credit.
+
+One fixed Ethereum WETH request returned three records in 920 ms with a valid `data`/`pagination` envelope. On that page, documented fields were present; timestamps were parseable and ascending, addresses and hashes matched Ethereum syntax, the requested token matched after normalization, and USD fields were numeric. The page contained three `BUY` actions and no `SELL` action. These counts describe one sample, not general provider semantics.
+
+The response exposed `trader_address_label` strings even though the request used no label filters. “No labels” therefore means no label filtering and no propagation or display of returned label contents; it does not mean the response omits the field. Raw values remain private.
+
+The page reported `is_last_page=false`. It cannot prove a full range, an empty material-action window, or No trade. The response supplied transaction hashes but no explicit event/leg ID, leaving the scoring module's stable per-leg identity requirement unresolved.
+
+The user reported 1,095 credits before the task. This was manually observed account evidence. The spike did not query a balance endpoint or retain a remaining-balance header, and it does not infer why the reported balance was five below 1,100.
+
+## Nansen questions remaining after the bounded live contract check
 
 - Which verified Ethereum token contracts and historical periods provide sufficient qualifying trades and candidate variety?
-- Do actual token DEX response fields match the proposed token-relative BUY/SELL interpretation, trader-address filter, timestamps, and USD estimates?
+- Does the observed `BUY`/`SELL` field remain token-relative for every swap shape, including multi-leg transactions? The single sample contained only `BUY` rows.
 - How do date boundaries, sorting, page sizes, pagination termination, and history availability work in actual responses? Can full lookback and answer-window coverage be demonstrated?
 - Which stable fields distinguish duplicate records from distinct swap legs? How should tied timestamps and multi-leg transactions be detected for rejection?
 - How are missing or invalid USD estimates represented, and can their possible effect on the first material action be determined?
-- What credit balance is actually available? What does each allowed request/page/retry cost, and is `X-Nansen-Credits-Used` present on successful and failed responses?
+- The success reported one credit cost and one credit used. Are the same headers present and trustworthy on validation failures, transient failures, retries, and credit/plan errors?
 - What rate-limit and `Retry-After` behavior is observed? How are timeouts or uncertain charges reconciled with account usage?
 - Does a fresh, complete round fit the proposed four-credit deal cap and ten-second deployed target? Neither is an observed result.
-- Which attempts count toward competition eligibility? Reconcile successful calls and the competition window with the submitting account; planned requests and cache hits do not count as observed usage.
+- Which attempts count toward competition eligibility? The newer Academy article says 100+ calls while the campaign landing page still says 1,000. Reconcile the current rule, the one observed successful call, and submitting-account usage; planned requests and cache hits do not count as observed usage.
 
 ## Public-use and external questions
 
@@ -50,7 +62,7 @@ No `agent-browser` executable, connected browser tool, Chromium/Firefox executab
 
 Installed versions: Next.js 16.3.6, React/React DOM 19.3.0, TypeScript 6.0.3, ESLint 9.39.5. ESLint 9 is deprecated but currently matches bundled lint-plugin peer requirements; TypeScript 7 is unsupported by the installed lint tooling. The production build required execution outside the sandbox for Next.js to capture its TypeScript subprocess output. Standalone type checking passed inside the sandbox. npm reported an unapproved `unrs-resolver` postinstall script; no approval was needed for the checks that passed.
 
-The [official Next.js installation documentation](https://nextjs.org/docs/app/getting-started/installation) and npm package metadata were consulted during setup. No provider data endpoints were queried.
+The [official Next.js installation documentation](https://nextjs.org/docs/app/getting-started/installation) and npm package metadata were consulted during setup. No provider data endpoints were queried during the skeleton milestone; the later bounded contract spike is recorded separately above.
 
 ## AI Playbook lesson — transfer later
 
@@ -74,7 +86,7 @@ Provider questions still requiring validation before real acquisition:
 - Are request date boundaries inclusive, and can the adapter request sufficient overlap to reapply `[start, end)` inequalities locally without gaps?
 - Can the provider return corrected or conflicting records under one stable identifier, and which provenance fields must be retained for audit?
 
-Until those questions are answered with bounded live evidence, the normalized event type and all synthetic fixtures remain provisional. They are not verified historical data.
+The bounded page resolved field-presence questions only. Until the remaining semantic, identity, boundary, and completeness questions are answered with bounded evidence, the normalized event type and all synthetic fixtures remain provisional. They are not verified historical data.
 
 ## Scoring review correction knowledge — September 23, 2026
 

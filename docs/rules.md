@@ -1,6 +1,6 @@
 # Deterministic rules contract
 
-`lib/rules.ts` is a pure offline rules module. Its normalized event interface is **provisional** until actual Nansen token DEX responses and provider semantics are validated. The module performs no network, database, environment-variable, or UI work.
+`lib/rules.ts` is a pure offline rules module. A bounded Nansen page confirmed several source field names and basic types, but its normalized event interface remains **provisional** until direction, stable leg identity, pagination, boundary, and completeness semantics are validated. The module performs no network, database, environment-variable, or UI work.
 
 Rule behavior is versioned. Version 4 retains the version 3 normalization and coverage rules and rejects numeric negative zero as an invalid USD value.
 
@@ -24,7 +24,7 @@ The round token and wallet, and every event token and wallet, must be syntactica
 
 The chain identifier remains exactly `ethereum`. Every supplied event must also use exactly `ethereum`; an event marked `Ethereum`, `eth`, another chain, or an empty value is invalid input even when its token or wallet would otherwise be irrelevant. The future acquisition adapter must supply only normalized Ethereum events. Provider chain aliases and casing have not been validated.
 
-Every transaction hash must be `0x` followed by exactly 64 hexadecimal characters. Valid hashes are lowercased before duplicate comparison and transaction grouping. Missing, whitespace-only, shortened, nonhex, or otherwise malformed hashes are invalid. This syntax and normalization rule does not validate that a transaction exists or establish how provider rows map to transaction legs.
+Every transaction hash must be `0x` followed by exactly 64 hexadecimal characters. Valid hashes are lowercased before duplicate comparison and transaction grouping. Missing, whitespace-only, shortened, nonhex, or otherwise malformed hashes are invalid. Three sampled provider rows used this syntax, but that observation does not validate that a transaction exists or establish how provider rows map to transaction legs.
 
 ## Completeness and conservative rejection
 
@@ -64,7 +64,7 @@ Public clues must express event timing relatively and trade size through reviewe
 
 ## Future acquisition-adapter guarantees
 
-Before real events may enter this module, the acquisition adapter and candidate-selection workflow must:
+The bounded spike observed one incomplete page and does not satisfy this boundary. Before real events may enter this module, the acquisition adapter and candidate-selection workflow must:
 
 1. Enforce the proposal's initial 10–40-day cutoff-selection range using recorded retrieval time, separately from the rules compiler.
 2. Verify that the provider endpoint returns token-relative Buy/Sell direction and map it to lowercase `buy` or `sell`.

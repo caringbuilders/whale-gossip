@@ -1,8 +1,26 @@
 # Project status
 
-Current milestone: deterministic scoring rules version 4 are accepted after Codex implementation, Claude review, Grok independent static review, Codex correction, and Claude targeted approval of `48d1218664ea61288c546fd26fff3e565c7d115f`. The final approval is recorded in `docs/reviews/48d1218.md`.
+Current milestone: the bounded local Nansen API contract spike is implemented and executed on top of the accepted deterministic scoring rules. The spike is local/server-only, defaults to dry-run, and is not connected to application code.
+
+## Bounded Nansen contract spike — September 23, 2026
+
+- Starting state was clean `main` at `ed760eb27c48d06ff6085be80f6e2cb27829d469`, synchronized with `origin/main`.
+- `.env.local` was confirmed present, ignored by `.env.*`, and untracked without reading or displaying its contents. The live script repeats the ignore and untracked checks before loading the key.
+- The implementation hard-allows only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. Its fixed request uses Ethereum WETH, `only_smart_money=false`, no label filters, a one-hour historical interval, ascending `block_timestamp`, and page 1 with three records.
+- Dry-run is the default and reports `networkRequestSent=false`. Explicit `--live` is required. The ignored durable ledger reserves before send, caps the milestone at five actual attempts and five retained credits, accounts conservatively for missing usage headers, and stores no request body, API key, authorization header, raw wallet value, or raw response.
+- Offline tests cover request construction, the endpoint allowlist, default dry-run behavior, attempt and credit caps, conservative unknown-charge settlement, ledger sanitization, synthetic response parsing, and retry/status classification. Existing scoring tests remain offline.
+- The reviewed dry run sent zero requests. The explicit live run made **one** actual attempt: HTTP 200, 920 ms, one reported credit cost, one reported credit used, and no retry. The provider returned three rows and `is_last_page=false`.
+- The sanitized page had the documented field names, parseable timestamp strings in ascending order, valid-looking Ethereum addresses and transaction hashes, `BUY` actions, matching token addresses, and numeric USD fields. Exact values and identifiers are not tracked in documentation.
+- The response included string `trader_address_label` values despite using no label filters. They remain private and must be discarded by future public or fixture serialization.
+- Raw response and accounting evidence are stored only in ignored `data/private/` and `data/ledgers/` paths. They are not Git candidates.
+- The user reported a pre-task balance of **1,095 credits**. This is manual evidence, not API-derived. No post-task balance was queried, and no explanation is inferred for the five-credit difference from 1,100.
+- Current official sources disagree on eligibility call count: the Academy article updated September 23 says **100+ calls**, while the campaign landing page still says 1,000. The proposal retains the earlier 1,000-call basis as historical planning context. Do not manufacture calls; reconcile the current rule and account usage before submission.
+
+Detailed evidence and remaining contract questions are in `docs/nansen-contract-spike.md`.
 
 ## Accepted deterministic scoring rules version 4
+
+The scoring rules remain accepted after Codex implementation, Claude review, Grok independent static review, Codex correction, and Claude targeted approval of `48d1218664ea61288c546fd26fff3e565c7d115f`. The final approval is recorded in `docs/reviews/48d1218.md`.
 
 - Grok 4.7 at High effort reported no blocking findings and one definite non-blocking issue: numeric `-0` bypassed the ordinary negative-value comparison.
 - Rules version 4 rejects `Object.is(usdValue, -0)` through the existing typed `invalid-usd-value` result.
@@ -26,15 +44,15 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 
 ## Remaining scoring limitations
 
-- `NormalizedTradeEvent` remains provisional. Actual Nansen field names, token-relative direction, timestamp precision, stable event/leg identity, transaction-leg representation, USD-value semantics, pagination, address representation, and coverage signals remain unvalidated.
+- `NormalizedTradeEvent` remains provisional. One bounded page confirmed relevant field names and basic JSON types, but token-relative direction across swap shapes, timestamp precision, stable event/leg identity, transaction-leg representation, USD-value semantics, pagination termination, and coverage signals remain unvalidated.
 - Conservative invalid-value and combined-leg ambiguity handling may reject events a future validated schema can classify safely. Any relaxation requires a versioned decision and boundary tests.
 - Tests are invented internal-contract fixtures. They are not verified historical rounds, provider response fixtures, live-path evidence, or evidence of API completeness.
-- No public serializer, answer-leakage test, acquisition adapter, real historical data, Nansen integration, API route, persistence, spending guard, or deployment was added or verified.
-- Version 4 is accepted as an offline deterministic scoring milestone. Production build behavior, provider behavior, live integration, persistence, UI integration, and public serialization remain unverified.
+- No public serializer, answer-leakage test, round acquisition/compiler adapter, reviewed real round, application API route, persistence, hosted spending guard, or deployment was added or verified.
+- Version 4 is accepted as an offline deterministic scoring milestone. The one-page spike is provider contract evidence only; production build behavior for this change, complete-window acquisition, application integration, persistence, UI integration, and public serialization remain unverified.
 
 ## Next proposed step
 
-Integrate a five-round offline game using explicitly synthetic fixtures and an enforced private/public serialization boundary. Public questions must exclude the private fields listed in `docs/rules.md`; answers and evidence remain private until reveal. Live Nansen retrieval remains disabled. Real historical acquisition and live integration require a later, separately authorized bounded milestone.
+Have Claude review the named contract-spike commit, especially the fail-closed ledger, secret boundary, default dry-run, response sanitization, and claim language. After accepted findings are resolved, the next separately authorized data step should determine stable per-leg identity and complete-pagination evidence with another small bounded probe. The application remains offline and no five-round acquisition has started.
 
 ## Accepted offline skeleton history
 

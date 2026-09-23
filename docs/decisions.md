@@ -20,7 +20,7 @@ These decisions summarize `PROPOSAL-v3.md` as the agreed planning baseline. They
 | Nansen REST | Historical observed activity through server code or an explicitly enabled acquisition script |
 | Bundled reviewed fixtures | Keyless play, offline development, and zero-spend fallback |
 
-Use ordinary token-centric `tgm/dex-trades` with `only_smart_money=false`, no label filters, and no displayed trader labels. This is the proposal's selected public-data path; actual response behavior remains to be checked. Attribute “Powered by Nansen API”. Keep wallet identities and raw responses private; publish reviewed transformed fixtures only.
+Use ordinary token-centric `tgm/dex-trades` with `only_smart_money=false`, no label filters, and no displayed trader labels. A bounded one-page probe confirmed the basic documented response shape, but it also returned label fields; the adapter must discard label contents from public and fixture output. Direction semantics, stable leg identity, complete pagination, and redistribution review remain unresolved. Attribute “Powered by Nansen API”. Keep wallet identities and raw responses private; publish reviewed transformed fixtures only.
 
 Separate a pure rules module from server adapters and storage. Planned routes are question (`/api/round`), guess/reveal (`/api/guess`), and guarded fresh retrieval (`/api/deal`). Planned scripts cover the contract spike, resumable acquisition, offline compilation, reviewed publishing, and usage reporting. These paths do not exist yet.
 
@@ -36,7 +36,13 @@ Reserve credits atomically before requests, count in-flight reservations, settle
 
 Codex implements small milestones; Claude independently reviews a named commit/diff; Codex resolves accepted findings. Pin dependencies and preserve the lockfile when introduced. Use Node LTS at least 22 and match development/deployment versions.
 
-The proposal targets ten real reviewed rounds and one complete live flow first, then deck expansion and hardening. Its internal submission target is September 26, 2026 at 23:59 America/New_York. Its stated eligibility plan targets at least 1,050 successful upstream calls reconciled with Nansen, above the stated 1,000-call requirement. These are future targets; external requirements and actual usage require validation. Do not generate wasteful calls to inflate counts.
+The proposal targets ten real reviewed rounds and one complete live flow first, then deck expansion and hardening. Its internal submission target is September 26, 2026 at 23:59 America/New_York. Its 1,050-call plan was based on the then-published 1,000-call requirement and remains historical context. On September 23, the newer official Academy article said 100+ calls, while the campaign landing page still displayed 1,000. Reconcile the current requirement and submitting-account usage before submission. Do not generate wasteful calls to inflate counts.
+
+## Bounded contract spike — September 23, 2026
+
+The local spike is a server/local-only script and support module, not application integration. It defaults to dry-run, hard-allows one endpoint, uses a fixed bounded request, reserves each attempt durably before send, and permits no more than five attempts or five retained credits. Raw responses and the ledger remain in ignored private paths. Normal tests and application commands make no provider request.
+
+One explicit live request is sufficient for this milestone unless it fails transiently. The completed probe used one attempt and one provider-reported credit, so no retry or follow-up page was requested. `is_last_page=false` is evidence that the response page was incomplete, not authorization to mark coverage complete or continue acquisition.
 
 ## Offline skeleton milestone — September 22, 2026
 
