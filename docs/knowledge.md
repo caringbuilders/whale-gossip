@@ -75,3 +75,17 @@ Provider questions still requiring validation before real acquisition:
 - Can the provider return corrected or conflicting records under one stable identifier, and which provenance fields must be retained for audit?
 
 Until those questions are answered with bounded live evidence, the normalized event type and all synthetic fixtures remain provisional. They are not verified historical data.
+
+## Scoring review correction knowledge — September 23, 2026
+
+The review of `db2f0b11eb3527cbb518acd8312138e8645be229` exposed a useful runtime-boundary lesson: a TypeScript discriminated union does not validate JSON-shaped input. Version 1 accepted an unknown coverage status if range fields looked sufficient and could throw on malformed values. Runtime parsing must validate the discriminant and every consumed field before rules logic runs, with typed fail-closed results.
+
+Ethereum addresses are now syntax-checked and lowercased for comparison. This prevents case-only missed matches, but it does not establish EIP-55 checksum validity, contract existence, whether an address is a wallet or token, or the exact format returned by Nansen. The future adapter must validate those semantics and preserve original values in private provenance.
+
+Multi-leg transaction handling remains intentionally conservative. Combining nonnegative leg values is only a signal that a transaction could cross the material threshold and therefore needs rejection when it could affect the answer. It does not validate aggregation, Buy/Sell netting, USD allocation across legs, or provider transaction structure. These questions remain open for the bounded provider contract check.
+
+The proposal's initial 10–40-day cutoff range belongs to candidate selection in the future acquisition workflow. The pure compiler consumes a fixed cutoff and checks its lookback and answer intervals. Retrieval after ten days can establish that the 48-hour interval is in the past, but cannot establish complete pagination, successful pages, or trustworthy provider coverage.
+
+Compiled scoring results must remain private because they contain wallet identity, transaction hashes, event IDs, answers, and evidence. A future public question serializer needs an explicit allowlist plus leakage tests for rendered HTML, RSC payloads, API responses, and client state.
+
+The correction suite uses syntactically valid invented Ethereum addresses and exercises order-independent results. The fixtures still provide no evidence about actual provider identifiers, casing, multi-leg behavior, or completeness signals. Claude's re-review of the correction remains pending.

@@ -1,33 +1,32 @@
 # Project status
 
-Current milestone: deterministic round scoring rules with explicitly synthetic offline tests, prepared for the local checkpoint `feat: add deterministic round rules and synthetic tests`. The accepted offline skeleton remains recorded at commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`; its review is in `docs/reviews/825ddc5.md`.
+Current milestone: correction of the deterministic scoring findings reported against commit `db2f0b11eb3527cbb518acd8312138e8645be229`. The accepted offline skeleton remains recorded at commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`; its review is in `docs/reviews/825ddc5.md`.
 
-## Deterministic scoring rules: verified progress
+## Scoring review correction: verified progress
 
-- Added pure TypeScript compilation and guess-scoring logic in `lib/rules.ts`. It has no network, database, environment-variable, UI, React, or Next.js dependency.
-- Added `docs/rules.md` to define the provisional normalized internal event contract and the guarantees a future acquisition adapter must provide before real provider events are accepted.
-- Implemented Ethereum-only, exact wallet/token matching; `[t0 - 30 days, t0)` lookback; five most recent qualifying `$500+` trades; `$25,000+` admission; and `[t0, t0 + 48 hours)` first-material-trade selection at `$2,500+`.
-- Compilation requires explicit lookback and answer-window coverage evidence. Missing pages, failed retrieval, insufficient covered ranges, and an answer window observed before its end return explicit unscorable reasons. Event arrays never establish completeness.
-- Matching events with null, non-finite, or negative USD values in either required window fail closed. Insufficient tape, missing admission evidence, conflicting duplicate IDs, distinct material legs in the first transaction, and tied earliest material events are also explicit unscorable outcomes. None become No trade.
-- Identical records deduplicate only by the same stable event/leg ID and identical normalized fields. Different IDs remain distinct even when transaction hashes match.
-- Valid guesses are `buy`, `sell`, and `no-trade`. A correct guess scores one point, a wrong valid guess scores zero, and any other value is rejected rather than scored.
-- Added 19 explicitly synthetic offline tests covering Buy, Sell, fully observed No trade, Ethereum-only compilation, cutoff/window and dollar boundaries, irrelevant identities, coverage failures, unfinished windows, invalid USD values, duplicates, distinct legs, tied events, unsorted input, pre-cutoff tape isolation, insufficient tape/admission, invalid guesses, and deterministic repeat compilation without input mutation.
-- Actual checks: `npm test` passed 19/19 outside the sandbox; `npm run lint` passed with zero warnings; `npm run typecheck` passed. The first sandboxed test attempt failed before executing tests because `tsx` could not create its local IPC pipe (`EPERM`); no test failed. No production build was run for this milestone.
-- Source inspection found no `fetch`, environment-variable, database, API-route, UI, or provider dependency in `lib/rules.ts` or its test file. No Nansen or other external data call was made.
+- The supplied review reported two blocking behaviors: unknown coverage states could pass as complete when they carried a sufficient range, and ambiguity detection ignored individually subthreshold legs whose transaction could be potentially material. Local reproductions also confirmed a case-only address mismatch could silently yield No trade, a duplicate conflict outside the scoring window was ignored, and malformed JSON-shaped input could throw.
+- Rules behavior is now version 2. Coverage status must be exactly `complete`; missing, malformed, unknown, explicitly incomplete, range-insufficient, contradictory, or unfinished evidence returns a typed unscorable reason.
+- `compileRound` now accepts and checks `unknown` input at runtime. The round and event addresses must have Ethereum address syntax and are compared in lowercase. This prevents case-only mismatches without claiming checksum, contract, or provider-format verification.
+- Matching event-ID conflicts are checked before time-window filtering. Failure selection is stable across event permutations.
+- Potentially material transaction ambiguity now considers every validated featured-token leg after exact deduplication. Summed nonnegative leg values are used only to trigger conservative ambiguity rejection; individual events still determine the answer and no provider netting or aggregation semantics are assumed.
+- A scorable result is explicitly private. A future public question serializer must omit wallet identity, transaction hashes, internal event IDs, answers, and outcome evidence.
+- The proposal's initial 10–40-day cutoff-selection rule is assigned to the future acquisition workflow. It is separate from the pure 48-hour scoring contract, and elapsed time does not prove provider completeness.
+- The synthetic suite now contains 26 offline tests, including exact `t0` tape isolation, one-millisecond coverage gaps, malformed runtime inputs, invalid fields, conflicts outside the scoring interval, case-only addresses, split and mixed-direction legs, ambiguity before/at/after a valid first action, and permutation-stable scorable and unscorable results.
+- Final pre-commit checks passed: `npm test` (26/26), `npm run lint` with zero warnings, `npm run typecheck`, and `git diff --check`. No production build was run for this documentation and rules correction.
 
-## Scoring milestone limitations
+The earlier version 1 status overstated coverage and ambiguity verification. Its 19 tests covered declared incomplete evidence and material multi-leg events, but did not exercise an unknown status with plausible ranges or subthreshold legs that combine to the material threshold. Those claims are superseded by this section and the review disposition in `docs/reviews/db2f0b1.md`.
 
-- `NormalizedTradeEvent` is provisional. Actual Nansen field names, token-relative direction, timestamp precision, stable event/leg identity, transaction-leg representation, USD-value semantics, pagination, and coverage signals remain unvalidated.
-- Conservative rejection treats every matching invalid USD value within a required window as potentially outcome-relevant. Provider validation may later justify a narrower rule, which would require a versioned decision and new tests.
-- Exact normalized identifier comparison assumes a future adapter canonicalizes Ethereum, token, and wallet identifiers.
-- Multiple material events sharing the first event's transaction hash are treated as an ambiguous multi-leg first transaction even if normalized timestamps differ. A validated adapter should preserve one transaction timestamp and stable leg identities.
+## Remaining scoring limitations
+
+- `NormalizedTradeEvent` remains provisional. Actual Nansen field names, token-relative direction, timestamp precision, stable event/leg identity, transaction-leg representation, USD-value semantics, pagination, address representation, and coverage signals remain unvalidated.
+- Conservative invalid-value and combined-leg ambiguity handling may reject events a future validated schema can classify safely. Any relaxation requires a versioned decision and boundary tests.
 - Tests are invented internal-contract fixtures. They are not verified historical rounds, provider response fixtures, live-path evidence, or evidence of API completeness.
-- No public/private serializer, guess route, application game flow, acquisition adapter, real historical data, Nansen integration, persistence, spending guard, or deployment was added or verified.
-- Independent Claude review of this milestone remains pending.
+- No public serializer, answer-leakage test, acquisition adapter, real historical data, Nansen integration, API route, persistence, spending guard, or deployment was added or verified.
+- Claude's re-review of the correction is pending and must not be recorded as complete until independently performed.
 
 ## Next proposed step
 
-Have Claude review the named scoring commit, prioritizing boundary inequalities, coverage fail-closed behavior, invalid-value relevance, deduplication versus distinct legs, earliest-event ambiguity, deterministic output, and whether test evidence matches the implementation. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
+Have Claude review the correction commit by hash, reproduce the two blockers, and independently check the new boundary and permutation tests. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
 
 ## Accepted offline skeleton history
 

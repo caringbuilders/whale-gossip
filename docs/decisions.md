@@ -55,3 +55,15 @@ Incomplete or failed coverage, an unfinished answer window, matching invalid val
 Conservative rejection takes precedence over creating a convenient answer. This first rules version rejects any matching null, non-finite, or negative USD value inside a required window because it could affect the tape, admission, or answer. Revisions after real schema validation must be versioned and backed by boundary tests.
 
 The test suite uses Node's test API through the minimal `tsx` runner. All fixtures are explicitly synthetic and cannot count toward real-round acceptance or live verification.
+
+## Scoring review correction — September 23, 2026
+
+Rules version 2 replaces version 1 for future compiled rounds. Runtime input is checked independently of TypeScript declarations, and malformed JSON-shaped input returns a typed unscorable result. Coverage segments must use the exact `complete` discriminant and valid covering ranges; unknown, malformed, contradictory, explicitly incomplete, insufficient, or unfinished evidence cannot produce an answer.
+
+Ethereum token and wallet addresses require `0x` plus 40 hexadecimal characters and are compared in lowercase. This resolves case-only mismatches deterministically. It is an internal syntax and comparison rule, not verification of checksums, contracts, wallet types, or provider address formats.
+
+Duplicate conflicts among matching events are checked before scoring-window filtering. Exact duplicate legs are removed by stable event ID and identical normalized fields. For ambiguity detection, all remaining answer-window legs are grouped by transaction. Multiple legs whose nonnegative values combine to at least `$2,500` trigger conservative ambiguity handling even when every leg is individually subthreshold. The sum is not used as a scored trade, direction net, or provider-semantic claim. An ambiguity blocks at or before the first individually material event, and anywhere in the answer window when no individual material event exists. Later ambiguity cannot alter an already established first event.
+
+Candidate acquisition and pure scoring have separate responsibilities. The future acquisition workflow enforces the proposal's initial cutoff selection of 10–40 days before retrieval and establishes pagination evidence. The compiler applies the 30-day lookback and 48-hour answer window to a supplied `t0`. Neither a ten-day delay nor an event array establishes complete provider coverage.
+
+Compiled rounds are private records. The future public question serializer must use an allowlist that omits wallet identity, transaction hashes, internal event IDs, the answer, and outcome evidence. Provider normalization, public serialization, and their integration tests remain future milestones.

@@ -20,8 +20,12 @@ import {
 const HOUR = 60 * 60 * 1_000;
 const DAY = 24 * HOUR;
 const T0 = Date.UTC(2026, 8, 1, 12, 0, 0);
-const TOKEN = "synthetic-token";
-const WALLET = "synthetic-wallet";
+const TOKEN = `0x${"a1".repeat(20)}`;
+const TOKEN_CASE_VARIANT = `0x${"A1".repeat(20)}`;
+const OTHER_TOKEN = `0x${"c3".repeat(20)}`;
+const WALLET = `0x${"b2".repeat(20)}`;
+const WALLET_CASE_VARIANT = `0x${"B2".repeat(20)}`;
+const OTHER_WALLET = `0x${"d4".repeat(20)}`;
 
 function event(
   eventId: string,
@@ -106,6 +110,7 @@ test("synthetic Buy round uses the first material event from unsorted input", ()
   });
   assert.deepEqual(result.visibleTape.map((trade) => trade.eventId), ["tape-1", "tape-2", "tape-3", "tape-4", "tape-5"]);
   assert.ok(result.visibleTape.every((trade) => trade.occurredAtMs < T0), "visible tape must not contain post-cutoff clues");
+  assert.equal(result.rulesVersion, "2");
 });
 
 test("synthetic Sell round is selected and scored", () => {
@@ -138,6 +143,8 @@ test("exact cutoff is included in the answer window and exact material threshold
   const result = requireScorable(compileRound(input([event("at-cutoff", T0, 2_500, "buy")])));
   assert.equal(result.answer.action, "buy");
   assert.equal(result.answer.action === "buy" ? result.answer.occurredAtMs : null, T0);
+  assert.ok(result.visibleTape.every((trade) => trade.eventId !== "at-cutoff"));
+  assert.ok(result.visibleTape.every((trade) => trade.occurredAtMs < T0));
 });
 
 test("visible threshold is inclusive and immediately lower values are excluded", () => {
@@ -177,12 +184,26 @@ test("round compilation is Ethereum-only", () => {
 
 test("wrong wallet, token, and chain events cannot determine the answer", () => {
   const irrelevant = [
-    event("wrong-wallet", T0, null, "sell", { wallet: "someone-else" }),
-    event("wrong-token", T0, 100_000, "sell", { token: "other-token" }),
+    event("wrong-wallet", T0, null, "sell", { wallet: OTHER_WALLET }),
+    event("wrong-token", T0, 100_000, "sell", { token: OTHER_TOKEN }),
     event("wrong-chain", T0, 100_000, "sell", { chain: "base" }),
   ];
   const result = requireScorable(compileRound(input([...irrelevant, event("matching-buy", T0 + HOUR, 3_000)])));
   assert.equal(result.answer.action, "buy");
+});
+
+test("Ethereum addresses match case-insensitively and malformed round addresses are rejected", () => {
+  const caseVariantAnswer = event("case-variant", T0 + HOUR, 3_000, "sell", {
+    token: TOKEN_CASE_VARIANT,
+    wallet: WALLET_CASE_VARIANT,
+  });
+  const result = requireScorable(compileRound(input([caseVariantAnswer])));
+  assert.equal(result.answer.action, "sell");
+  assert.equal(result.featuredToken, TOKEN);
+  assert.equal(result.wallet, WALLET);
+
+  expectUnscorable(compileRound({ ...input(), featuredToken: "synthetic-token" }), "invalid-ethereum-address");
+  expectUnscorable(compileRound({ ...input(), wallet: "0x1234" }), "invalid-ethereum-address");
 });
 
 test("missing pages and retrieval failures remain explicit coverage failures", () => {
@@ -215,17 +236,91 @@ test("missing pages and retrieval failures remain explicit coverage failures", (
   }
 });
 
-test("coverage ranges cannot be inferred from events and must span the required windows", () => {
-  const result = compileRound(
+test("missing, malformed, unknown, and contradictory coverage cannot compile", () => {
+  const base = input();
+  const cases: Array<{ value: unknown; code: string; detail: string }> = [
+    { value: { ...base, coverage: undefined }, code: "coverage-invalid", detail: "missing" },
+    { value: { ...base, coverage: null }, code: "coverage-invalid", detail: "malformed" },
+    {
+      value: {
+        ...base,
+        coverage: {
+          ...base.coverage,
+          answerWindow: {
+            status: "mystery",
+            fromMs: T0,
+            toMsExclusive: T0 + ANSWER_WINDOW_MS,
+          },
+        },
+      },
+      code: "coverage-invalid",
+      detail: "unknown-status",
+    },
+    {
+      value: {
+        ...base,
+        coverage: {
+          ...base.coverage,
+          lookback: {
+            status: "complete",
+            reason: "missing-pages",
+            fromMs: T0 - LOOKBACK_MS,
+            toMsExclusive: T0,
+          },
+        },
+      },
+      code: "coverage-invalid",
+      detail: "contradictory",
+    },
+    {
+      value: {
+        ...base,
+        coverage: {
+          ...base.coverage,
+          lookback: { fromMs: T0 - LOOKBACK_MS, toMsExclusive: T0 },
+        },
+      },
+      code: "coverage-invalid",
+      detail: "malformed",
+    },
+  ];
+
+  for (const item of cases) {
+    let result: RoundCompilationResult | undefined;
+    assert.doesNotThrow(() => {
+      result = compileRound(item.value);
+    });
+    assert.ok(result);
+    const rejected = expectUnscorable(result, item.code);
+    if (rejected.status === "unscorable" && rejected.reason.code === "coverage-invalid") {
+      assert.equal(rejected.reason.detail, item.detail);
+    }
+  }
+});
+
+test("coverage ending or starting one millisecond inside a required window is insufficient", () => {
+  const answerEndsEarly = compileRound(
     input([], {
       coverage: completeCoverage({
-        answerWindow: { status: "complete", fromMs: T0 + 1, toMsExclusive: T0 + ANSWER_WINDOW_MS },
+        answerWindow: { status: "complete", fromMs: T0, toMsExclusive: T0 + ANSWER_WINDOW_MS - 1 },
       }),
     }),
   );
-  const rejected = expectUnscorable(result, "coverage-incomplete");
-  if (rejected.status === "unscorable" && rejected.reason.code === "coverage-incomplete") {
-    assert.equal(rejected.reason.detail, "range-mismatch");
+  const rejectedAnswer = expectUnscorable(answerEndsEarly, "coverage-incomplete");
+  if (rejectedAnswer.status === "unscorable" && rejectedAnswer.reason.code === "coverage-incomplete") {
+    assert.equal(rejectedAnswer.reason.detail, "range-mismatch");
+  }
+
+  const lookbackStartsLate = compileRound(
+    input([], {
+      coverage: completeCoverage({
+        lookback: { status: "complete", fromMs: T0 - LOOKBACK_MS + 1, toMsExclusive: T0 },
+      }),
+    }),
+  );
+  const rejectedLookback = expectUnscorable(lookbackStartsLate, "coverage-incomplete");
+  if (rejectedLookback.status === "unscorable" && rejectedLookback.reason.code === "coverage-incomplete") {
+    assert.equal(rejectedLookback.reason.detail, "range-mismatch");
   }
 });
 
@@ -246,6 +341,33 @@ test("relevant null and invalid USD values fail closed", () => {
   expectUnscorable(compileRound(input([], { events: invalidLookback })), "invalid-usd-value");
 });
 
+test("malformed JSON-shaped inputs and event fields return typed failures without throwing", () => {
+  const malformedInputs: unknown[] = [
+    null,
+    {},
+    { ...input(), featuredToken: 7 },
+    { ...input(), events: "not-an-array" },
+    { ...input(), events: [...baseLookback(), null] },
+    {
+      ...input(),
+      events: [...baseLookback(), { ...event("bad-time", T0 + ANSWER_WINDOW_MS + 1, 3_000), occurredAtMs: "later" }],
+    },
+    {
+      ...input(),
+      events: [...baseLookback(), { ...event("bad-action", T0 + HOUR, 3_000), action: "hold" }],
+    },
+  ];
+
+  for (const malformed of malformedInputs) {
+    let result: RoundCompilationResult | undefined;
+    assert.doesNotThrow(() => {
+      result = compileRound(malformed);
+    });
+    assert.ok(result);
+    assert.equal(result.status, "unscorable");
+  }
+});
+
 test("identical records are deduplicated", () => {
   const first = event("duplicate-buy", T0 + HOUR, 2_500);
   const result = requireScorable(compileRound(input([first, { ...first }])));
@@ -259,17 +381,71 @@ test("conflicting records that reuse an event ID are unscorable", () => {
   expectUnscorable(compileRound(input([first, second])), "conflicting-duplicate");
 });
 
+test("conflicting matching duplicate IDs are rejected before window filtering", () => {
+  const outside = T0 + ANSWER_WINDOW_MS + DAY;
+  const first = event("outside-conflict", outside, 1_000);
+  const second = { ...first, usdValue: 2_000 };
+  const result = expectUnscorable(compileRound(input([first, second])), "conflicting-duplicate");
+  if (result.status === "unscorable" && result.reason.code === "conflicting-duplicate") {
+    assert.equal(result.reason.eventId, "outside-conflict");
+  }
+});
+
 test("distinct transaction legs are preserved and make the first event ambiguous", () => {
   const legs = [
     event("leg-a", T0 + HOUR, 3_000, "buy", { transactionHash: "shared-transaction" }),
     event("leg-b", T0 + HOUR, 4_000, "sell", { transactionHash: "shared-transaction" }),
   ];
-  expectUnscorable(compileRound(input(legs)), "ambiguous-multi-leg-first-event");
+  expectUnscorable(compileRound(input(legs)), "ambiguous-potentially-material-transaction");
 });
 
 test("tied earliest material events in different transactions are unscorable", () => {
   const tied = [event("tie-a", T0 + HOUR, 3_000), event("tie-b", T0 + HOUR, 3_000, "sell")];
   expectUnscorable(compileRound(input(tied)), "tied-first-events");
+});
+
+test("split buys and mixed-direction subthreshold legs conservatively trigger ambiguity", () => {
+  const splitBuys = [
+    event("split-buy-a", T0 + HOUR, 1_300, "buy", { transactionHash: "split-buy" }),
+    event("split-buy-b", T0 + HOUR, 1_300, "buy", { transactionHash: "split-buy" }),
+  ];
+  expectUnscorable(compileRound(input(splitBuys)), "ambiguous-potentially-material-transaction");
+
+  const mixed = [
+    event("mixed-a", T0 + HOUR, 1_300, "buy", { transactionHash: "mixed" }),
+    event("mixed-b", T0 + HOUR, 1_300, "sell", { transactionHash: "mixed" }),
+  ];
+  expectUnscorable(compileRound(input(mixed)), "ambiguous-potentially-material-transaction");
+
+  const belowTrigger = [
+    event("small-a", T0 + HOUR, 1_200, "buy", { transactionHash: "small" }),
+    event("small-b", T0 + HOUR, 1_299.99, "sell", { transactionHash: "small" }),
+  ];
+  assert.deepEqual(requireScorable(compileRound(input(belowTrigger))).answer, { action: "no-trade" });
+});
+
+test("ambiguity before or at the first material event rejects, while later ambiguity cannot change it", () => {
+  const before = [
+    event("before-a", T0 + HOUR, 1_300, "buy", { transactionHash: "before" }),
+    event("before-b", T0 + HOUR, 1_300, "sell", { transactionHash: "before" }),
+    event("valid-later", T0 + 2 * HOUR, 3_000, "buy"),
+  ];
+  expectUnscorable(compileRound(input(before)), "ambiguous-potentially-material-transaction");
+
+  const atFirst = [
+    event("first-material-leg", T0 + HOUR, 2_500, "sell", { transactionHash: "at-first" }),
+    event("first-small-leg", T0 + HOUR, 100, "buy", { transactionHash: "at-first" }),
+  ];
+  expectUnscorable(compileRound(input(atFirst)), "ambiguous-potentially-material-transaction");
+
+  const after = [
+    event("valid-first", T0 + HOUR, 3_000, "sell"),
+    event("after-a", T0 + 2 * HOUR, 1_300, "buy", { transactionHash: "after" }),
+    event("after-b", T0 + 2 * HOUR, 1_300, "sell", { transactionHash: "after" }),
+  ];
+  const accepted = requireScorable(compileRound(input(after)));
+  assert.equal(accepted.answer.action, "sell");
+  assert.equal(accepted.answer.action === "sell" ? accepted.answer.eventId : null, "valid-first");
 });
 
 test("insufficient qualifying tape and absent admission evidence are distinct failures", () => {
@@ -299,4 +475,42 @@ test("identical inputs compile to deeply identical outputs without mutation", ()
 
   assert.deepEqual(first, second);
   assert.deepEqual(source, before);
+});
+
+test("input permutations produce identical scorable and unscorable results", () => {
+  const scorableEvents = [
+    ...baseLookback(),
+    event("later", T0 + 2 * HOUR, 3_000, "sell"),
+    event("first", T0 + HOUR, 3_000, "buy"),
+  ];
+  const expectedScorable = compileRound(input([], { events: scorableEvents }));
+  assert.deepEqual(compileRound(input([], { events: scorableEvents.toReversed() })), expectedScorable);
+  assert.deepEqual(
+    compileRound(input([], { events: [...scorableEvents.slice(3), ...scorableEvents.slice(0, 3)] })),
+    expectedScorable,
+  );
+
+  const invalidEvents = [
+    ...baseLookback(),
+    event("later-invalid", T0 + 2 * HOUR, null),
+    event("earlier-invalid", T0 + HOUR, Number.NaN),
+  ];
+  const expectedUnscorable = compileRound(input([], { events: invalidEvents }));
+  const reversedUnscorable = compileRound(input([], { events: invalidEvents.toReversed() }));
+  assert.deepEqual(reversedUnscorable, expectedUnscorable);
+  assert.equal(expectedUnscorable.status, "unscorable");
+  if (expectedUnscorable.status === "unscorable") assert.equal(expectedUnscorable.reason.code, "invalid-usd-value");
+
+  const malformedEvents: unknown[] = [
+    ...baseLookback(),
+    { ...event("a-bad-action", T0 + HOUR, 3_000), action: "hold" },
+    { ...event("z-bad-time", T0 + 2 * HOUR, 3_000), occurredAtMs: "later" },
+  ];
+  const malformedInput = { ...input(), events: malformedEvents };
+  const expectedMalformed = compileRound(malformedInput);
+  assert.deepEqual(compileRound({ ...malformedInput, events: malformedEvents.toReversed() }), expectedMalformed);
+  assert.deepEqual(expectedMalformed, {
+    status: "unscorable",
+    reason: { code: "invalid-event", eventId: "z-bad-time", field: "occurredAtMs" },
+  });
 });
