@@ -1,8 +1,38 @@
 # Project status
 
-As of September 22, 2026. Current milestone: first local Git checkpoint. This status records the verified preparation immediately before the foundation commit; use Git history for its resulting hash.
+Current milestone: offline application skeleton, prepared for the local commit `feat: scaffold offline Whale Gossip app`. Use Git history for its resulting hash. The previous foundation commit is `0a5e1f2700f831089f37cc072597ab0de3b866ea`; it was pushed to the configured origin before this milestone. This milestone must not be pushed yet.
 
-## Verified setup
+## Offline skeleton: verified progress
+
+- Added Next.js App Router and TypeScript files individually, preserving `AGENTS.md`, `CLAUDE.md`, and the proposal unchanged.
+- The responsive landing page is titled “Whale Gossip” and explains five rounds, one Ethereum token per round, and Buy/Sell/No trade in a historical 48-hour window. It explicitly states that this is an offline development skeleton with no playable rounds, trade data, results, or working Nansen integration.
+- Node `24.21.0` and npm `11.19.0` were rechecked. `.nvmrc` records the exact Node version; `package.json` requires Node 24. Direct dependencies are pinned; `package-lock.json` is retained. `.env.example` contains comments only and no credentials are needed.
+- Installed Next.js `16.3.6`, React/React DOM `19.3.0`, TypeScript `6.0.3`, ESLint `9.39.5`, and the matching Next.js lint configuration.
+- `npm run lint` passed with zero warnings. `npm run typecheck` passed. `npm run build` passed with the home and not-found pages statically prerendered. The initial sandboxed build could not parse the TypeScript subprocess output; the same production build succeeded outside the sandbox.
+- `npm start` served the production page on loopback. An HTTP check returned 200 and verified the title, offline notice, planned game explanation, and absence of external script/style/image URLs in HTML.
+- Source review found no application fetch calls, external URLs, environment access, client components, authentication, API routes, or database connections. npm scripts disable Next.js telemetry; fonts and styling are local/system resources. No Nansen requests or other live data retrieval were performed.
+- Reviewed the two Server Components using the React skill checklist: no hooks or client state, semantic headings/landmarks, a keyboard-focusable in-page link, and responsive CSS. No claim of browser accessibility or visual testing is made.
+- `git diff --check` passed and the proposal/instruction files were confirmed unchanged.
+
+## Remaining skeleton limitations
+
+- Visual, browser-console, keyboard, and mobile viewport verification remain pending: no browser automation tool or browser binary was available. The HTTP check is not a browser test.
+- npm marks ESLint 9.39.5 as deprecated. It is retained because the installed Next.js lint plugins declare peer support through ESLint 9; ESLint 10 produced peer conflicts. TypeScript 7 was also rejected by the lint tooling; TypeScript 6 passes the checks. Revisit tooling compatibility when upstream plugins support newer releases.
+- npm reported an unapproved `unrs-resolver` postinstall script. It was not enabled; lint, type checking, and build passed without approving it.
+- No game rules module, fixtures, guess/reveal flow, live integration, hosted persistence, spend guard, or deployment is implemented. No gameplay tests or live verification were performed. Independent Claude review is pending.
+- No clean-clone installation timing or browser network trace was performed.
+
+## View locally and next proposed step
+
+From `/home/aitooluse/work/hackathons/whale-gossip`, run `npm run dev` and open **http://localhost:3000**. Use `npm ci` first on a fresh checkout. The development server binds to loopback. For the built version, use `npm start` instead.
+
+Next, review this milestone and visually check desktop/mobile rendering. A subsequent bounded task can implement pure scoring rules with explicitly synthetic boundary fixtures and meaningful offline tests, without enabling live acquisition.
+
+## Foundation milestone history (September 22, 2026)
+
+The following records the earlier documentation-only checkpoint; it is historical, not the current implementation status.
+
+### Verified foundation setup
 
 - The current project folder is `/home/aitooluse/work/hackathons/whale-gossip`.
 - `PROPOSAL-v3.md` exists and was read in full. It describes an implementation proposal, not a completed build or authenticated API validation.
@@ -13,7 +43,7 @@ As of September 22, 2026. Current milestone: first local Git checkpoint. This st
 - The user supplied the author identity, now configured only for this repository: Anil Wijesooriya, `212802896+caringbuilders@users.noreply.github.com`. No global settings were changed.
 - The proposal and five documentation files were reviewed for scope consistency. Product and architecture decisions remain unchanged; stale Git setup statements were updated.
 
-## Unverified and not performed
+### Not performed during the foundation task
 
 No application was built, packages installed, Nansen calls made, database changes made, or deployments performed during this task. No application tests or authenticated/live checks were run.
 
@@ -21,7 +51,7 @@ Credentials and account access were not inspected. GitHub linkage, VS Code setup
 
 There are no verified rounds or verified live-flow results from this session. Provider account usage is unknown; do not infer a zero account total from this task's lack of calls.
 
-## Next proposed small milestone
+### Proposed next step at the foundation checkpoint
 
 The foundation checkpoint uses message `docs: establish Whale Gossip project foundation` and contains only the proposal, five project documentation files, and `.gitignore`. No remote creation or push is part of this milestone. Preparation checks verified the exact staged file list, reviewed file contents for credentials/private data, and exercised 12 ignore-rule cases. The proposal retains intentional Markdown line-break spaces.
 

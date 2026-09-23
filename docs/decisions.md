@@ -37,3 +37,9 @@ Reserve credits atomically before requests, count in-flight reservations, settle
 Codex implements small milestones; Claude independently reviews a named commit/diff; Codex resolves accepted findings. Pin dependencies and preserve the lockfile when introduced. Use Node LTS at least 22 and match development/deployment versions.
 
 The proposal targets ten real reviewed rounds and one complete live flow first, then deck expansion and hardening. Its internal submission target is September 26, 2026 at 23:59 America/New_York. Its stated eligibility plan targets at least 1,050 successful upstream calls reconciled with Nansen, above the stated 1,000-call requirement. These are future targets; external requirements and actual usage require validation. Do not generate wasteful calls to inflate counts.
+
+## Offline skeleton milestone — September 22, 2026
+
+The authorized first application step is a static App Router landing page only. It explains the future game without rounds, results, or simulated live functionality. No API routes, authentication, database clients, or acquisition scripts are introduced. Plain CSS and system fonts keep the page self-contained; Next.js telemetry is disabled in npm scripts.
+
+Scaffold files were added individually to preserve existing project documents. Node 24.21.0 is recorded in `.nvmrc`, the package engine requires Node 24, and exact direct dependency versions plus the npm lockfile define the installation. This advances the implementation in smaller steps without changing the product scope.

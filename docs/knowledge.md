@@ -11,10 +11,10 @@
 | npm | `npm --version`: `11.19.0` |
 | Git executable | `git --version`: `2.53.0` |
 | Git checkout | Initially absent; an empty `.git` directory and no parent repository were found. Initialized locally with `git init -b main`; foundation checkpoint preparation verified |
-| Git identity / remotes | User-supplied name and email configured locally; no configured remotes |
+| Git identity / remotes | User-supplied name and email configured locally; origin is `https://github.com/caringbuilders/whale-gossip.git` |
 | Initial project files | Proposal and its `:Zone.Identifier` sidecar; requested documentation did not exist |
 
-The proposal specifies Windows with WSL2/Ubuntu and VS Code, GitHub as canonical source, and Codespaces as fallback. The kernel supports the WSL2 observation; the Linux distribution, editor, and fallback availability were not checked. There is no configured Git remote. No credentials were read or tested. Node support status and deployment runtime parity have not been independently validated.
+The proposal specifies Windows with WSL2/Ubuntu and VS Code, GitHub as canonical source, and Codespaces as fallback. The kernel supports the WSL2 observation; the Linux distribution, editor, and fallback availability were not checked. The foundation commit was pushed to origin in the preceding milestone; local `main` tracks `origin/main`. GitHub authentication was verified then without displaying credentials. No Nansen credentials were read or tested. Node support status and deployment runtime parity have not been independently validated.
 
 ## Nansen questions requiring a bounded live contract check
 
@@ -38,6 +38,16 @@ Recheck official competition rules, call eligibility, deadlines, submission link
 
 ## Future infrastructure verification
 
-The local author identity is configured for the foundation checkpoint. Remote setup is separate future work. Later verify Vercel/Supabase project linkage, secret storage, private table grants/RLS/function privileges, shared budget reservations under concurrency, idempotency, and fail-closed storage behavior. No hosted resources or controls have been verified by this documentation setup.
+The local author identity is configured for the foundation checkpoint. The GitHub remote is connected; this application milestone is local only and must not be pushed yet. Later verify Vercel/Supabase project linkage, secret storage, private table grants/RLS/function privileges, shared budget reservations under concurrency, idempotency, and fail-closed storage behavior. No hosted resources or controls have been verified by this documentation setup.
 
 Private acquisition artifacts belong under ignored `data/` paths (for example `data/private/`, `data/raw/`, `data/cache/`, and `data/ledgers/`) or `private/`. Only `data/sample-deck.json` and `data/fixtures/` are allowed through the data ignore rule, and require explicit review before staging. Ignore rules do not inspect content or protect files force-added to Git.
+
+## Offline application environment
+
+Node 24.21.0 and npm 11.19.0 were rechecked for the skeleton. No environment file or credential is needed. `.env.example` contains comments only. `npm run dev` serves loopback at http://localhost:3000; `npm run build` and `npm start` provide a local production check. Package installation requires network access; application source has no external data retrieval code.
+
+No `agent-browser` executable, connected browser tool, Chromium/Firefox executable at standard checked paths, or default Playwright browser cache was found. Visual verification remains pending.
+
+Installed versions: Next.js 16.3.6, React/React DOM 19.3.0, TypeScript 6.0.3, ESLint 9.39.5. ESLint 9 is deprecated but currently matches bundled lint-plugin peer requirements; TypeScript 7 is unsupported by the installed lint tooling. The production build required execution outside the sandbox for Next.js to capture its TypeScript subprocess output. Standalone type checking passed inside the sandbox. npm reported an unapproved `unrs-resolver` postinstall script; no approval was needed for the checks that passed.
+
+The [official Next.js installation documentation](https://nextjs.org/docs/app/getting-started/installation) and npm package metadata were consulted during setup. No provider data endpoints were queried.
