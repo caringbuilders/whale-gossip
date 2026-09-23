@@ -57,3 +57,21 @@ The [official Next.js installation documentation](https://nextjs.org/docs/app/ge
 **Marked for later transfer to the shared AI Playbook.** Review a named commit or immutable diff so the implementation under review is unambiguous. In the review record, separate checks the reviewer independently performed from checks reported in the implementation handoff but not repeated. Phrase evidence at its actual level: HTML/static inspection can establish that source contains no external references or application fetch calls, but it cannot establish runtime network behavior without a browser network capture.
 
 Avoid running `next build` against the same `.next` directory while `next dev` is running. Both processes write framework artifacts there, so concurrent use can produce misleading failures or corrupt the verification state. Stop the development server before a production build, or use separate working directories/build directories when concurrent execution is unavoidable.
+
+## Deterministic rules knowledge
+
+The offline rules contract is documented in `docs/rules.md` and implemented in `lib/rules.ts`. It consumes explicit coverage evidence for the lookback and answer window because an event list, including an empty list, cannot prove complete pagination. `tsx` 4.23.15 is the only test-runner addition; the tests otherwise use the Node test and strict-assert APIs.
+
+The first sandboxed `npm test` invocation did not execute tests because `tsx` was denied permission to create `/tmp/tsx-1000/14.pipe`. Running the same offline command outside the sandbox passed 19 tests. This is an execution-environment limitation, not a scoring-rule failure. npm reported unapproved install scripts for `unrs-resolver` and `esbuild`; neither was approved, and tests, lint, and type checking passed without enabling them.
+
+Provider questions still requiring validation before real acquisition:
+
+- Does token DEX direction reliably describe Buy/Sell relative to the requested featured token for every relevant swap shape?
+- Which provider fields form a stable unique transaction-leg ID across pagination, retries, and retrieval times? Can distinct legs share every available identifier except array position?
+- What timestamp precision and tie behavior does the endpoint provide, and do all legs of one transaction carry the same timestamp?
+- Which USD field is appropriate for the thresholds, and how are null, missing, non-finite, estimated, or partially priced values represented?
+- How can an adapter prove that every relevant page in both half-open windows was retrieved, including endpoint caps, empty terminal pages, timeouts, and retries?
+- Are request date boundaries inclusive, and can the adapter request sufficient overlap to reapply `[start, end)` inequalities locally without gaps?
+- Can the provider return corrected or conflicting records under one stable identifier, and which provenance fields must be retained for audit?
+
+Until those questions are answered with bounded live evidence, the normalized event type and all synthetic fixtures remain provisional. They are not verified historical data.

@@ -17,10 +17,13 @@ Open **http://localhost:3000**. The server binds to loopback. Initial dependency
 ## Checks
 
 ```bash
+npm test
 npm run lint
 npm run typecheck
 npm run build
 ```
+
+The rules tests use explicitly synthetic offline fixtures. They verify the internal deterministic contract only and are not historical Nansen rounds or live-integration evidence. The normalized event interface remains provisional until provider responses are validated.
 
 To serve the production build locally, run `npm start` and open the same URL. Do not run the development and production servers on the same port simultaneously.
 

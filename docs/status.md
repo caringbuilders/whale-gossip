@@ -1,8 +1,37 @@
 # Project status
 
-Current milestone: offline application skeleton accepted after independent review of commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`. Claude reported no blocking findings. The detailed evidence boundary is recorded in `docs/reviews/825ddc5.md`.
+Current milestone: deterministic round scoring rules with explicitly synthetic offline tests, prepared for the local checkpoint `feat: add deterministic round rules and synthetic tests`. The accepted offline skeleton remains recorded at commit `825ddc515592b4bed9ca5f35728e11cdf969b8e7`; its review is in `docs/reviews/825ddc5.md`.
 
-## Offline skeleton: verified progress
+## Deterministic scoring rules: verified progress
+
+- Added pure TypeScript compilation and guess-scoring logic in `lib/rules.ts`. It has no network, database, environment-variable, UI, React, or Next.js dependency.
+- Added `docs/rules.md` to define the provisional normalized internal event contract and the guarantees a future acquisition adapter must provide before real provider events are accepted.
+- Implemented Ethereum-only, exact wallet/token matching; `[t0 - 30 days, t0)` lookback; five most recent qualifying `$500+` trades; `$25,000+` admission; and `[t0, t0 + 48 hours)` first-material-trade selection at `$2,500+`.
+- Compilation requires explicit lookback and answer-window coverage evidence. Missing pages, failed retrieval, insufficient covered ranges, and an answer window observed before its end return explicit unscorable reasons. Event arrays never establish completeness.
+- Matching events with null, non-finite, or negative USD values in either required window fail closed. Insufficient tape, missing admission evidence, conflicting duplicate IDs, distinct material legs in the first transaction, and tied earliest material events are also explicit unscorable outcomes. None become No trade.
+- Identical records deduplicate only by the same stable event/leg ID and identical normalized fields. Different IDs remain distinct even when transaction hashes match.
+- Valid guesses are `buy`, `sell`, and `no-trade`. A correct guess scores one point, a wrong valid guess scores zero, and any other value is rejected rather than scored.
+- Added 19 explicitly synthetic offline tests covering Buy, Sell, fully observed No trade, Ethereum-only compilation, cutoff/window and dollar boundaries, irrelevant identities, coverage failures, unfinished windows, invalid USD values, duplicates, distinct legs, tied events, unsorted input, pre-cutoff tape isolation, insufficient tape/admission, invalid guesses, and deterministic repeat compilation without input mutation.
+- Actual checks: `npm test` passed 19/19 outside the sandbox; `npm run lint` passed with zero warnings; `npm run typecheck` passed. The first sandboxed test attempt failed before executing tests because `tsx` could not create its local IPC pipe (`EPERM`); no test failed. No production build was run for this milestone.
+- Source inspection found no `fetch`, environment-variable, database, API-route, UI, or provider dependency in `lib/rules.ts` or its test file. No Nansen or other external data call was made.
+
+## Scoring milestone limitations
+
+- `NormalizedTradeEvent` is provisional. Actual Nansen field names, token-relative direction, timestamp precision, stable event/leg identity, transaction-leg representation, USD-value semantics, pagination, and coverage signals remain unvalidated.
+- Conservative rejection treats every matching invalid USD value within a required window as potentially outcome-relevant. Provider validation may later justify a narrower rule, which would require a versioned decision and new tests.
+- Exact normalized identifier comparison assumes a future adapter canonicalizes Ethereum, token, and wallet identifiers.
+- Multiple material events sharing the first event's transaction hash are treated as an ambiguous multi-leg first transaction even if normalized timestamps differ. A validated adapter should preserve one transaction timestamp and stable leg identities.
+- Tests are invented internal-contract fixtures. They are not verified historical rounds, provider response fixtures, live-path evidence, or evidence of API completeness.
+- No public/private serializer, guess route, application game flow, acquisition adapter, real historical data, Nansen integration, persistence, spending guard, or deployment was added or verified.
+- Independent Claude review of this milestone remains pending.
+
+## Next proposed step
+
+Have Claude review the named scoring commit, prioritizing boundary inequalities, coverage fail-closed behavior, invalid-value relevance, deduplication versus distinct legs, earliest-event ambiguity, deterministic output, and whether test evidence matches the implementation. Real historical acquisition and live integration remain pending and require a separately authorized bounded milestone.
+
+## Accepted offline skeleton history
+
+### Offline skeleton: verified progress
 
 - Added Next.js App Router and TypeScript files individually, preserving `AGENTS.md`, `CLAUDE.md`, and the proposal unchanged.
 - The responsive landing page is titled “Whale Gossip” and explains five rounds, one Ethereum token per round, and Buy/Sell/No trade in a historical 48-hour window. It explicitly states that this is an offline development skeleton with no playable rounds, trade data, results, or working Nansen integration.
@@ -15,7 +44,7 @@ Current milestone: offline application skeleton accepted after independent revie
 - `git diff --check` passed and the proposal/instruction files were confirmed unchanged.
 - Claude independently reviewed the named scaffold commit and accepted it with no blocking findings. Claude's HTML/static inspection found no external references or application fetch calls; runtime network behavior was not verified through a browser network capture. Build, lint, type-check, and loopback HTTP results remain Codex-reported checks that Claude did not repeat.
 
-## Remaining skeleton limitations
+### Remaining skeleton limitations
 
 - Visual, browser-console, keyboard, and mobile viewport verification remain pending: no browser automation tool or browser binary was available. The HTTP check is not a browser test.
 - npm marks ESLint 9.39.5 as deprecated. It is retained because the installed Next.js lint plugins declare peer support through ESLint 9; ESLint 10 produced peer conflicts. TypeScript 7 was also rejected by the lint tooling; TypeScript 6 passes the checks. Revisit tooling compatibility when upstream plugins support newer releases.
@@ -23,7 +52,7 @@ Current milestone: offline application skeleton accepted after independent revie
 - No game rules module, fixtures, guess/reveal flow, live integration, hosted persistence, spend guard, or deployment is implemented. No gameplay tests or live verification were performed.
 - No clean-clone installation timing or browser network trace was performed.
 
-## View locally and next proposed step
+### View locally and next proposed step
 
 From `/home/aitooluse/work/hackathons/whale-gossip`, run `npm run dev` and open **http://localhost:3000**. Use `npm ci` first on a fresh checkout. The development server binds to loopback. For the built version, use `npm start` instead.
 

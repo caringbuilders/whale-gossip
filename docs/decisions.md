@@ -43,3 +43,15 @@ The proposal targets ten real reviewed rounds and one complete live flow first, 
 The authorized first application step is a static App Router landing page only. It explains the future game without rounds, results, or simulated live functionality. No API routes, authentication, database clients, or acquisition scripts are introduced. Plain CSS and system fonts keep the page self-contained; Next.js telemetry is disabled in npm scripts.
 
 Scaffold files were added individually to preserve existing project documents. Node 24.21.0 is recorded in `.nvmrc`, the package engine requires Node 24, and exact direct dependency versions plus the npm lockfile define the installation. This advances the implementation in smaller steps without changing the product scope.
+
+## Deterministic scoring milestone — September 22, 2026
+
+The rules layer is a pure TypeScript module that accepts provisional normalized events plus explicit coverage evidence. It does not infer completeness from an event array and does not import framework, network, environment, storage, or UI code. The normalized shape uses exact canonical identifiers, integer UTC epoch milliseconds, token-relative lowercase actions, stable per-leg event IDs, transaction hashes, and nullable USD estimates. These are internal assumptions pending provider validation, not claims about the Nansen response schema.
+
+Both the 30-day lookback and 48-hour answer window use half-open intervals. Exact dollar thresholds qualify. The returned tape is the last five qualifying pre-cutoff events in chronological order. Admission is evaluated across all validated matching lookback events, not only the displayed five.
+
+Incomplete or failed coverage, an unfinished answer window, matching invalid values, conflicting duplicate IDs, insufficient tape, absent admission, an ambiguous first transaction with distinct material legs, and tied earliest material events are unscorable. Identical stable-ID records with identical fields are deduplicated. Different stable IDs are never collapsed merely because they share a transaction hash.
+
+Conservative rejection takes precedence over creating a convenient answer. This first rules version rejects any matching null, non-finite, or negative USD value inside a required window because it could affect the tape, admission, or answer. Revisions after real schema validation must be versioned and backed by boundary tests.
+
+The test suite uses Node's test API through the minimal `tsx` runner. All fixtures are explicitly synthetic and cannot count toward real-round acceptance or live verification.
