@@ -46,6 +46,22 @@ test("runtime parser rejects malformed or semantically contradictory 200 bodies"
   for (const value of malformed) assert.equal(parseGuessApiResponse(value), null);
 });
 
+test("runtime parser rejects a forged correct score when the guess and recorded action disagree", () => {
+  const valid = validSuccess();
+  const forged = {
+    ok: true,
+    reveal: {
+      ...valid.reveal,
+      guess: "sell",
+      recordedAction: "Buy",
+      correct: true,
+      points: 1,
+    },
+  };
+
+  assert.equal(parseGuessApiResponse(forged), null);
+});
+
 test("synchronous gate blocks rapid duplicate activation and reopens after completion", () => {
   const gate = createSubmissionGate();
   const first = beginSubmission(gate);
