@@ -1,5 +1,21 @@
 # Environment knowledge and open validation questions
 
+## Offline acquisition workflow knowledge — September 24, 2026
+
+The repository currently has one verified acquisition token address: canonical Ethereum WETH9 from the closed contract spike. No external address verification was performed for this milestone, so expanding the token universe remains open.
+
+Version 1 deliberately uses token-centric coverage because the repository has no validated request contract for filtering `tgm/dex-trades` by wallet. This can be expensive. Private pilot evidence must establish page yield and whether useful complete intervals fit the 130-attempt ceiling before expanding acquisition.
+
+Inclusive provider dates are handled by a one-millisecond request overlap at the local start and inclusion of the local exclusive end. The adapter then enforces `[start, end)` locally. This is a defensive transformation, not live proof of Nansen's boundary behavior. Exact millisecond ISO timestamps are required so loss of precision cannot silently move an event across `t0` or the 48-hour endpoint.
+
+The endpoint has not supplied a provider-stable leg ID. `derived-v1` IDs hash the canonical complete row for deterministic local processing. A provider label can therefore affect the private fingerprint, but labels are not copied into normalized events or reports. Exact rows may deduplicate. Same-identity conflicting rows and multiple matching rows under one transaction hash reject conservatively while correction and leg semantics are unknown.
+
+The acquisition ledger is separate from the closed spike ledger. Status begins from the documented three spike successes without reading that historical file. The internal target is 120 combined successes: three existing plus up to 117 useful acquisition successes. The current Academy requirement says 100+ while the older campaign page says 1,000; both remain recorded until reconciled. The manually observed 1,092 dashboard balance is historical evidence only.
+
+The exact future pilot command is `npm run nansen:acquire -- --live --max-new-calls 10 --target-total-success 120`. It has not been run and is not authorized by implementation or credential availability. Separate clones/worktrees cannot coordinate the local lock or ledger and must not run live acquisition.
+
+Provider direction, stable identity, USD allocation, multi-leg structure, inclusive boundaries, pagination termination/stability, candidate yield, and account eligibility remain unresolved. A terminal flag observed in future private evidence must be checked with page continuity and request identity; it is not sufficient by itself.
+
 ## Observed locally on September 22, 2026
 
 | Item | Evidence |

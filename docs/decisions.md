@@ -2,6 +2,18 @@
 
 These decisions summarize `PROPOSAL-v3.md` as the agreed planning baseline. They do not assert implementation or independent validation of external claims. Record later scope changes here before coding them.
 
+## Offline real-candidate acquisition workflow — September 24, 2026
+
+- Keep bulk acquisition in local/server-only modules and a CLI that the public application cannot import. Default dry-run and status remain keyless and network-free; live mode requires the complete explicit flags and a separately authorized per-run allowance.
+- Keep the reviewed token universe at canonical WETH9 until more non-stable ERC-20 contracts are verified without guessing. The existing provider contract does not validate a wallet-filter request field, so version 1 retrieves token coverage and filters wallets locally.
+- Freeze deterministic 40-to-10-day discovery windows on first live initialization. Discovery can nominate candidates but cannot establish scoring coverage. Each candidate gets separately paginated coverage with inclusive request overlap and local half-open filtering.
+- Use adapter version 1 canonical full-row fingerprints as derived local event IDs. Do not describe them as provider-stable IDs. Collapse only exact canonical duplicates and reject conflicting identities or repeated matching transaction hashes while provider leg semantics remain unresolved.
+- Compile only complete candidate evidence through rules version 4. The acquisition layer establishes provider/page completeness and conservative normalization; `lib/rules.ts` remains the sole scoring implementation.
+- Use a new ignored local acquisition ledger and lock with hard limits of 130 attempts and 130 retained/reported credits. Do not reopen, import, or mutate the permanently closed three-attempt spike ledger. Combined reporting adds the documented constant of three successes.
+- Target at most 117 useful acquisition successes for 120 combined successes. This is an internal margin over the current 100+ wording, not a resolution of the older 1,000-call page and not permission to make live calls.
+- Store raw data, caches, identities, exact evidence, compilation outcomes, and provenance only in ignored restrictive private paths. Generate a counts-only aggregate report. Real round publication remains a separate explicit human review using an allowlist serializer; acquisition never auto-publishes fixtures.
+- Local canonical locking cannot coordinate separate clones or worktrees, so live acquisition from them is forbidden. Hosted/shared coordination remains future work.
+
 ## Product
 
 - Build Whale Gossip before returning to the separate 0600 news/wiki project; keep repository and hosted infrastructure separate.
