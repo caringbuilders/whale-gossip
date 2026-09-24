@@ -1,6 +1,22 @@
 # Project status
 
-Current milestone: the independently approved page-2/page-3 Nansen pagination probe has run exactly once and the three-attempt contract-spike milestone is permanently closed. Further acquisition requires a new reviewed and explicitly authorized workflow.
+Current milestone: a complete five-round offline game now runs on explicitly synthetic fixtures through the accepted scoring rules version 4 and a tested private/public serialization boundary. It makes no provider calls. Independent review and any resulting corrections are the next proposed checkpoint.
+
+## Synthetic offline game — September 24, 2026
+
+- Ten fictional private round inputs compile through `lib/rules.ts`; they cover Buy, Sell, No trade, exact `t0`, the exact material threshold, varied tape values, and deliberately unsorted input. A fixed five-round selection is deterministic and includes all three answer types.
+- Private source inputs, valid-but-fictional addresses and hashes, exact timestamps and USD values, event IDs, answers, and evidence live in `lib/server/synthetic-rounds.ts`. The client imports only public types and receives serialized questions.
+- The pure allowlist serializer emits a round ID, fictional token display name, fictional wallet pseudonym, relative times, broad size bands, five ordered tape entries, rules version, and the exact source label “Synthetic offline fixture.” It omits addresses, source IDs, exact times and values, future events, the answer, coverage, and raw/provider data.
+- `POST /api/guess` accepts exactly a server-owned round ID and `buy`, `sell`, or `no-trade`. It returns an allowlisted reveal only after the guess and makes no external call. Malformed JSON, unknown rounds, invalid guesses, and extra source-shaped fields return typed safe errors.
+- The responsive interface supports five locked-after-guess rounds, explicit reveal and Next steps, score, replay, result copying, keyboard controls, visible focus, announced status, narrow layouts, and reduced-motion preferences. It labels the deck as synthetic, retains “Powered by Nansen API,” and states that it is not investment advice.
+- The boundary is an offline demonstration design, not authentication or anti-cheat protection. Repository/server access exposes the fictional deck, and a caller can submit repeated guesses.
+- Automated leakage tests check forbidden keys and private sentinel/source values in both payload types, deterministic output and selection, ordinary zero behavior, signed-zero rejection, route validation, and the client-module import boundary.
+- **Codex verification:** the final `npm test` passed 87/87 with the automatic outbound-network guard; `npm run lint`, `npm run typecheck`, and `git diff --check` passed. A React review found no added dependency, render waterfall, client-side private import, or avoidable heavy bundle; question props are minimal allowlisted values.
+- The existing loopback development server returned HTTP 200. HTTP-level checks found no private sentinel, source address/hash/ID, exact private timestamp/value, or answer key in the initial HTML/RSC response or 14 referenced client scripts. Five server-owned round IDs each returned one valid reveal, and an invalid guess returned the typed 400 response. These were local HTTP checks, not browser interaction or a browser network capture.
+- Browser automation remains unavailable: no `agent-browser`, supported browser executable, or cached Playwright browser was found. Visual layout, console, full UI click/keyboard flow, score/replay/copy behavior, narrow Android viewport, focus movement, and browser-captured network behavior therefore remain pending. No production build was run because a development server is active on the shared `.next` directory.
+- This milestone made **zero Nansen or other external calls** and consumed **zero credits**. No packages were installed. The user-verified Nansen dashboard balance after the closed three-call spike is **1,092 credits**; it is dashboard evidence, not inferred from the spike ledger.
+
+Real acquired rounds, provider normalization and completeness, persistence, authentication, hosted spending controls, production live mode, and deployment remain unimplemented and unverified. The three-attempt contract spike remains permanently closed; further acquisition requires a new reviewed and explicitly authorized workflow.
 
 ## Pagination-probe execution — September 24, 2026
 
@@ -92,7 +108,7 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 
 ## Next proposed step
 
-Design a separate bounded acquisition workflow for reviewed real-round candidates, including complete pagination evidence, stable leg identity, direction validation, resumability, and its own reviewed spending authorization. The closed contract-spike script must not be extended or rerun. The application remains offline and no five-round acquisition has started.
+Independently review the named offline-game commit, with emphasis on initial-payload answer leakage, the server/client import boundary, full keyboard and narrow-screen play, route validation, and the five-round score/replay flow. Real-round acquisition remains a separate later workflow with new review and explicit spending authorization; the closed contract-spike script must not be extended or rerun.
 
 ## Accepted offline skeleton history
 

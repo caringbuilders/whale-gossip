@@ -131,3 +131,13 @@ Public relative times and size bands reduce direct lookup clues, but a distincti
 Grok 4.7 at High effort independently noticed that numeric negative zero bypasses an ordinary `< 0` validation. JavaScript preserves the sign bit for `-0` while most comparisons treat it as zero, so signed zero requires `Object.is(value, -0)` when the normalized contract rejects every negative representation.
 
 This was a useful distinct finding from a third model after Codex implementation and Claude review. One useful result does not establish a standing requirement for three-model review; reviewer choice should remain proportional to milestone risk and unresolved questions. The static Grok review did not validate provider behavior or execute the repository checks.
+
+## Synthetic game boundary knowledge — September 24, 2026
+
+The offline game demonstrates a practical server/client split without claiming security it does not have. Private synthetic inputs and compiled outcomes remain in `lib/server/synthetic-rounds.ts`. Server-rendered question props come only from the allowlist serializer, while the same-origin guess route looks up the private round by ID and returns a separately allowlisted reveal. Client modules are statically tested against importing the private fixture module.
+
+Serialization tests need both structural and value checks. Forbidden-key traversal catches accidental additions such as `transactionHash` or `answer`; unique sentinel and exact-source-value checks catch leaks under innocent-looking renamed keys. Determinism tests protect stable public payloads. These checks reduce accidental disclosure but do not replace inspection of generated HTML/RSC payloads and client bundles, and the offline route is not authentication or anti-cheat protection.
+
+Ordinary numeric zero remains valid but nonmaterial and invisible in the question because answer-window events are never serialized. Numeric negative zero still fails through rules version 4. Broad size bands and relative time descriptions are derived only after compilation and do not modify scoring evidence.
+
+The user verified a Nansen dashboard balance of **1,092 credits after the three-call spike**. This is manual dashboard evidence, distinct from the ignored local ledger's three reported credits and not a balance inferred by code. The synthetic-game milestone makes zero Nansen calls and consumes zero credits. Real acquisition still requires resolution of the existing direction, leg identity, USD, pagination, boundary, completeness, and redistribution questions.

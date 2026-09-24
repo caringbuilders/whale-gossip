@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Whale Gossip",
-  description: "An offline development skeleton for a historical Ethereum trading game. No playable rounds or live integration yet.",
+  description: "A five-round synthetic offline demo about historical-style Ethereum trading clues.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

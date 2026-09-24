@@ -22,7 +22,7 @@ These decisions summarize `PROPOSAL-v3.md` as the agreed planning baseline. They
 
 Use ordinary token-centric `tgm/dex-trades` with `only_smart_money=false`, no label filters, and no displayed trader labels. A bounded one-page probe confirmed the basic documented response shape, but it also returned label fields; the adapter must discard label contents from public and fixture output. Direction semantics, stable leg identity, complete pagination, and redistribution review remain unresolved. Attribute “Powered by Nansen API”. Keep wallet identities and raw responses private; publish reviewed transformed fixtures only.
 
-Separate a pure rules module from server adapters and storage. Planned routes are question (`/api/round`), guess/reveal (`/api/guess`), and guarded fresh retrieval (`/api/deal`). Planned scripts cover the contract spike, resumable acquisition, offline compilation, reviewed publishing, and usage reporting. These paths do not exist yet.
+Separate a pure rules module from server adapters and storage. The synthetic offline game now uses server-rendered allowlisted question props and `POST /api/guess` for guess/reveal. Future real/live work may add question (`/api/round`) and guarded fresh retrieval (`/api/deal`) routes. Planned scripts beyond the closed contract spike cover resumable acquisition, reviewed publishing, and usage reporting.
 
 Cache by endpoint, normalized parameters, and schema version. Freeze source snapshots and version decks/rules so shared challenges remain reproducible. Withhold answers from runtime question payloads; acknowledge that public fixture source is inspectable.
 
@@ -49,6 +49,14 @@ After review, the local safety boundary includes an exclusive filesystem lock ar
 The prepared pagination probe is a separate mode requiring the exact flags `--live --pagination-probe`. It may start only from the ledger's exact one-attempt historical success state; the original page-1 mode requires an empty ledger and cannot spend continuation slots. Pagination requests page 2 once and page 3 only after a valid nonterminal page 2, with no retries and an unconditional stop after page 3. The historical attempt plus at most two new reservations exhausts the three-attempt ceiling. These pages cannot establish complete scoring coverage, and a separate future acquisition workflow must handle any later pagination.
 
 The approved pagination probe ran once on September 24 and consumed both remaining reservations successfully. Pages 2 and 3 each returned three rows and `is_last_page=false`; the script stopped after page 3. The three-attempt contract-spike milestone is permanently closed. No further contract-spike call is permitted. Future acquisition requires a new reviewed workflow and explicit authorization, with complete-window evidence handled separately from this bounded schema probe.
+
+## Synthetic offline game milestone — September 24, 2026
+
+The offline game uses ten compiled private synthetic rounds and a deterministic five-round selection. Private fixture data stays under `lib/server/`; a pure explicit-allowlist serializer is the only conversion into browser question and reveal payloads. Question props contain relative time, size bands, fictional display identities, and visible pre-cutoff tape only. Answers are looked up by a server-owned round ID after a valid guess.
+
+The `/api/guess` boundary accepts no caller-supplied events, provider endpoints, wallet/token addresses, or request bodies. It is intentionally a small offline demonstration boundary. It prevents accidental initial-payload disclosure but does not provide user authentication, rate limiting, session ownership, or anti-cheat guarantees.
+
+The game uses the accepted rules version 4 without changing scoring or provider-spike code. All fixtures are invented contract tests and UI content; none is a Nansen observation, a reviewed historical round, or evidence of provider completeness. The milestone installs no packages, makes no provider call, and consumes no credits.
 
 ## Offline skeleton milestone — September 22, 2026
 

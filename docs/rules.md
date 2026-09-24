@@ -47,11 +47,11 @@ Transaction grouping considers every validated featured-token leg in the answer 
 
 The combined leg amount is a conservative ambiguity trigger only. It is not a verified trade value, a netting rule, an instruction to combine swaps, or a new way to score Buy or Sell. Actual provider leg structure, transaction direction, aggregation semantics, and stable identifiers remain unresolved.
 
-## Private compilation boundary
+## Private compilation and synthetic serializer boundary
 
 A scorable compilation is private internal data. It contains wallet identity, source event IDs and transaction hashes, the answer, and outcome evidence. It must never be returned directly as the public question.
 
-A future public question serializer must use an explicit allowlist and omit at least:
+The synthetic offline game implements a pure explicit-allowlist serializer. Its public question omits:
 
 - wallet identity and any raw provider labels;
 - transaction hashes and internal event IDs;
@@ -60,7 +60,11 @@ A future public question serializer must use an explicit allowlist and omit at l
 - exact USD values;
 - private provenance and raw acquisition records.
 
-Public clues must express event timing relatively and trade size through reviewed bands rather than exact timestamps or USD amounts. These transformations reduce trivial transaction lookup but do not guarantee wallet anonymity: a distinctive sequence of public clues may still be identifiable when compared with public chain data. The serializer and its answer-leakage tests do not exist yet.
+Public clues express event timing relatively and trade size through broad reviewed bands rather than exact timestamps or USD amounts. The question includes only a server-owned round ID, fictional token display name, fictional wallet pseudonym, ordered visible tape, rules version, prompt, and synthetic source label. A separate post-guess serializer may add the correct action, correctness, relative elapsed time, answer size band, points, and concise synthetic evidence while continuing to omit private identifiers and exact evidence.
+
+Ten synthetic inputs are held in a clearly private server module and compiled through this rules module. Five are selected deterministically. The initial page receives only question payloads; `POST /api/guess` accepts a server-owned round ID plus a valid guess and performs the private lookup before serializing the reveal. Tests traverse public keys, search for unique private sentinels and exact source values, and enforce that the client component does not import the private module.
+
+This is an offline demonstration boundary, not authentication or anti-cheat protection. A user with repository or server access can inspect the invented deck, and a distinctive sequence from a future real deck could still be correlated with public chain history. The current implementation neither claims anonymity nor authorizes real-round publication.
 
 ## Future acquisition-adapter guarantees
 
