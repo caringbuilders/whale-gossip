@@ -28,6 +28,10 @@ The page reported `is_last_page=false`. It cannot prove a full range, an empty m
 
 The user reported 1,095 credits before the task. This was manually observed account evidence. The spike did not query a balance endpoint or retain a remaining-balance header, and it does not infer why the reported balance was five below 1,100.
 
+Claude's review of `fa1249f` demonstrated that provider-call accounting must bound transport behavior as well as loop iterations. Default fetch redirects can create multiple requests under one reservation and can forward a custom API-key header. A read/count/append ledger also needs cross-process exclusion. The correction uses redirect rejection plus an exclusive lock held for the entire live run. Canonical paths prevent a changed working directory from creating a second budget, but separate clones still require an operational prohibition until shared storage exists.
+
+Credential isolation also requires selecting the source explicitly. `process.loadEnvFile` preserves an existing shell value and imports unrelated file entries, so the corrected runner parses only `NANSEN_API_KEY` from the canonical repository file. Header parsing precedes raw persistence so a storage failure cannot erase already observed charge evidence.
+
 ## Nansen questions remaining after the bounded live contract check
 
 - Which verified Ethereum token contracts and historical periods provide sufficient qualifying trades and candidate variety?

@@ -44,6 +44,8 @@ The local spike is a server/local-only script and support module, not applicatio
 
 One explicit live request is sufficient for this milestone unless it fails transiently. The completed probe used one attempt and one provider-reported credit, so no retry or follow-up page was requested. `is_last_page=false` is evidence that the response page was incomplete, not authorization to mark coverage complete or continue acquisition.
 
+After review, the local safety boundary includes an exclusive filesystem lock around the complete live run, canonical repository-root paths, no-follow private-file operations, and `redirect: "error"`. Crash-left locks do not expire automatically. Separate clones and worktrees must not be used to bypass the local ledger because each has independent private state. These controls remain local spike controls, not a substitute for the future shared hosted reservation system.
+
 ## Offline skeleton milestone — September 22, 2026
 
 The authorized first application step is a static App Router landing page only. It explains the future game without rounds, results, or simulated live functionality. No API routes, authentication, database clients, or acquisition scripts are introduced. Plain CSS and system fonts keep the page self-contained; Next.js telemetry is disabled in npm scripts.

@@ -1,6 +1,19 @@
 # Project status
 
-Current milestone: the bounded local Nansen API contract spike is implemented and executed on top of the accepted deterministic scoring rules. The spike is local/server-only, defaults to dry-run, and is not connected to application code.
+Current milestone: the bounded local Nansen API contract spike has an offline safety correction after Claude's review of `fa1249f`. The correction is implemented but not independently re-reviewed. Further pagination and all other live work remain unauthorized.
+
+## Contract-spike review correction — September 23, 2026
+
+- Claude found two blockers in `fa1249f`: default redirect following could forward the API key/body and produce uncounted requests, and concurrent runners could race past the five-attempt cap. The review is recorded in `docs/reviews/fa1249f.md`.
+- Fetch now sets `redirect: "error"`. A rejected redirect settles one reserved attempt as `request-error` and stops; one reservation contains exactly one fetch invocation.
+- An exclusive no-follow lock derived from the canonical ledger path is acquired before the first live reservation and held for the complete run. Concurrent and crash-left locks fail closed before reserve/fetch. Normal release closes the descriptor first and removes only the same inode.
+- Repository-root paths come from the runner module location, so changing the working directory cannot start a separate ledger. Separate clones and worktrees still have separate ledgers and must not be used for parallel live acquisition.
+- Runtime key loading reads only `NANSEN_API_KEY` from the canonical `.env.local` through the narrow parser. It does not call `process.loadEnvFile`, populate unrelated environment variables, or allow an existing shell value to override the file.
+- Ledger/lock/raw access uses no-follow file opens, validates regular files and parent-directory chains, and preserves restrictive permissions. Unsafe paths fail closed.
+- Response status and credit headers are parsed before raw persistence. A raw-write failure retains known accounting and stops conservatively. Signed-zero observed USD values invalidate the response contract summary.
+- The request loop is import-safe and testable through injected fetch, paths, key, clock, sleep, raw writer, and observer. Offline regressions directly cover 401/402/403 stops, two 503 attempts, unexpected pricing, redirects, malformed pagination, unknown arguments, non-mutating dry-run, retained-credit and five-attempt caps, ledger ordering, double settlement, malformed headers, 3xx responses, key redaction/isolation, lock contention/crash residue, and raw-write accounting.
+- This correction made **zero Nansen or other external calls** and consumed **zero credits**. The earlier historical evidence remains one successful call with one reported credit used and a manually reported pre-spike balance of 1,095. No current balance is inferred.
+- **Codex verification:** the final guarded `npm test` run passed 64/64 and the guard's fetch-blocking sanity check passed. `npm run lint`, `npm run typecheck`, and `git diff --check` passed. Dependency manifests and the lockfile are unchanged. No production build was run.
 
 ## Bounded Nansen contract spike — September 23, 2026
 
@@ -8,7 +21,7 @@ Current milestone: the bounded local Nansen API contract spike is implemented an
 - `.env.local` was confirmed present, ignored by `.env.*`, and untracked without reading or displaying its contents. The live script repeats the ignore and untracked checks before loading the key.
 - The implementation hard-allows only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. Its fixed request uses Ethereum WETH, `only_smart_money=false`, no label filters, a one-hour historical interval, ascending `block_timestamp`, and page 1 with three records.
 - Dry-run is the default and reports `networkRequestSent=false`. Explicit `--live` is required. The ignored durable ledger reserves before send, caps the milestone at five actual attempts and five retained credits, accounts conservatively for missing usage headers, and stores no request body, API key, authorization header, raw wallet value, or raw response.
-- Offline tests cover request construction, the endpoint allowlist, default dry-run behavior, attempt and credit caps, conservative unknown-charge settlement, ledger sanitization, synthetic response parsing, and retry/status classification. Existing scoring tests remain offline.
+- The original 44-test suite covered request construction, endpoint allowlisting, default dry-run output, attempt-cap enforcement, conservative unknown-charge settlement, ledger sanitization, synthetic response parsing, and status classification. It did not directly exercise the live request loop; that overstatement is corrected by the post-review tests above.
 - The reviewed dry run sent zero requests. The explicit live run made **one** actual attempt: HTTP 200, 920 ms, one reported credit cost, one reported credit used, and no retry. The provider returned three rows and `is_last_page=false`.
 - The sanitized page had the documented field names, parseable timestamp strings in ascending order, valid-looking Ethereum addresses and transaction hashes, `BUY` actions, matching token addresses, and numeric USD fields. Exact values and identifiers are not tracked in documentation.
 - The response included string `trader_address_label` values despite using no label filters. They remain private and must be discarded by future public or fixture serialization.
@@ -52,7 +65,7 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 
 ## Next proposed step
 
-Have Claude review the named contract-spike commit, especially the fail-closed ledger, secret boundary, default dry-run, response sanitization, and claim language. After accepted findings are resolved, the next separately authorized data step should determine stable per-leg identity and complete-pagination evidence with another small bounded probe. The application remains offline and no five-round acquisition has started.
+Have Claude re-review the correction commit, especially redirect failure, exclusive locking, no-follow path handling, key isolation, accounting order, and direct runner tests. Further pagination remains unauthorized until blocking findings are accepted. The application remains offline and no five-round acquisition has started.
 
 ## Accepted offline skeleton history
 

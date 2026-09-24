@@ -1,6 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeSync,
+  type Stats,
+} from "node:fs";
+import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 
 /**
  * Local/server-only Nansen contract-spike support. Application and browser code
@@ -181,10 +193,12 @@ export function summarizeDexTradesResponse(value: unknown): DexTradesContractSum
   const traders = rows.map((row) => row.trader_address).filter((item): item is string => typeof item === "string");
   const tokens = rows.map((row) => row.token_address).filter((item): item is string => typeof item === "string");
   const usdValues = rows.map((row) => row.estimated_value_usd);
+  const hasSignedZeroUsd = usdValues.some((item) => typeof item === "number" && Object.is(item, -0));
+  if (hasSignedZeroUsd) issues.push("invalid-estimated-value-usd:signed-zero");
 
   return {
     contract: "tgm-dex-trades",
-    validEnvelope: Boolean(root && data && rows.length === data.length && validPagination),
+    validEnvelope: Boolean(root && data && rows.length === data.length && validPagination && !hasSignedZeroUsd),
     recordCount: data?.length ?? null,
     fields,
     pagination: {
@@ -220,10 +234,12 @@ export function summarizeDexTradesResponse(value: unknown): DexTradesContractSum
         matchingProbeToken: tokens.filter((item) => item.toLowerCase() === PROBE_TOKEN_ADDRESS).length,
       },
       estimatedUsdValues: {
-        numbers: usdValues.filter((item) => typeof item === "number" && Number.isFinite(item)).length,
+        numbers: usdValues.filter(
+          (item) => typeof item === "number" && Number.isFinite(item) && !Object.is(item, -0),
+        ).length,
         nulls: usdValues.filter((item) => item === null).length,
         other: usdValues.filter((item) => item !== null && (typeof item !== "number" || !Number.isFinite(item))).length,
-        negative: usdValues.filter((item) => typeof item === "number" && item < 0).length,
+        negative: usdValues.filter((item) => typeof item === "number" && (item < 0 || Object.is(item, -0))).length,
       },
     },
     issues: [...new Set(issues)].sort(),
@@ -281,9 +297,122 @@ export interface LedgerSummary {
   readonly retainedCredits: number;
 }
 
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return null;
+    throw new Error("Unable to inspect a private contract-spike path");
+  }
+}
+
+function assertOwnedByCurrentUser(stat: Stats): void {
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    throw new Error("Private contract-spike path is owned by another user");
+  }
+}
+
+function assertSafeRegularFile(stat: Stats): void {
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Private contract-spike file is not a regular file");
+  assertOwnedByCurrentUser(stat);
+  if ((stat.mode & 0o077) !== 0) throw new Error("Private contract-spike file permissions are too broad");
+}
+
+function assertDirectoryChainIsSafe(path: string): void {
+  const absolute = resolve(path);
+  const root = parse(absolute).root;
+  let current = root;
+  for (const part of absolute.slice(root.length).split(/[\\/]+/).filter(Boolean)) {
+    current = join(current, part);
+    const stat = lstatOrNull(current);
+    if (!stat?.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error("Private contract-spike path contains an unsafe parent");
+    }
+  }
+}
+
+export function ensurePrivateDirectory(path: string): void {
+  const absolute = resolve(path);
+  if (!isAbsolute(absolute)) throw new Error("Private contract-spike path must be absolute");
+  const root = parse(absolute).root;
+  let current = root;
+  const relativeParts = absolute.slice(root.length).split(/[\\/]+/).filter(Boolean);
+  for (const part of relativeParts) {
+    current = join(current, part);
+    let stat = lstatOrNull(current);
+    if (stat === null) {
+      try {
+        mkdirSync(current, { mode: 0o700 });
+      } catch {
+        throw new Error("Unable to create a private contract-spike directory");
+      }
+      stat = lstatOrNull(current);
+    }
+    if (!stat?.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error("Private contract-spike path contains an unsafe parent");
+    }
+  }
+
+  const finalStat = lstatOrNull(absolute);
+  if (!finalStat) throw new Error("Private contract-spike directory is unavailable");
+  assertOwnedByCurrentUser(finalStat);
+  if ((finalStat.mode & 0o077) !== 0) throw new Error("Private contract-spike directory permissions are too broad");
+}
+
+export function readCredentialTextFile(path: string): string {
+  assertDirectoryChainIsSafe(dirname(path));
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    throw new Error("Unable to read the repository credential file safely");
+  }
+  try {
+    assertSafeRegularFile(fstatSync(descriptor));
+    return readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function openPrivateFile(path: string, flags: number, mode = 0o600): number {
+  ensurePrivateDirectory(dirname(path));
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, flags | constants.O_NOFOLLOW, mode);
+  } catch {
+    throw new Error("Unable to open a private contract-spike file safely");
+  }
+  try {
+    assertSafeRegularFile(fstatSync(descriptor));
+    return descriptor;
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+export function readPrivateTextFile(path: string): string {
+  const descriptor = openPrivateFile(path, constants.O_RDONLY);
+  try {
+    return readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function writePrivateTextFileExclusive(path: string, contents: string): void {
+  const descriptor = openPrivateFile(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL);
+  try {
+    writeSync(descriptor, contents);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function appendDurably(path: string, entry: LedgerEntry): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const file = openSync(path, "a", 0o600);
+  const file = openPrivateFile(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT);
   try {
     writeSync(file, `${JSON.stringify(entry)}\n`);
     fsyncSync(file);
@@ -315,7 +444,7 @@ function isLedgerEntry(value: unknown): value is LedgerEntry {
   const baseIsValid =
     value.ledgerVersion === 1 &&
     typeof value.attemptId === "string" &&
-    value.attemptId.length > 0 &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.attemptId) &&
     typeof value.recordedAt === "string" &&
     Number.isFinite(Date.parse(value.recordedAt)) &&
     value.endpoint === NANSEN_DEX_TRADES_ENDPOINT &&
@@ -359,8 +488,10 @@ function isLedgerEntry(value: unknown): value is LedgerEntry {
 }
 
 function readLedger(path: string): LedgerEntry[] {
-  if (!existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
+  const stat = lstatOrNull(path);
+  if (stat === null) return [];
+  if (stat.isSymbolicLink()) throw new Error("Contract-spike ledger path is unsafe");
+  const text = readPrivateTextFile(path);
   if (text.trim() === "") return [];
   const entries = text
     .trimEnd()
@@ -422,6 +553,7 @@ export class ContractSpikeLedger {
       throw new Error("Contract-spike retained-credit cap is exhausted");
     }
     const attemptId = this.createId();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(attemptId)) throw new Error("Attempt ID is invalid");
     if (latestByAttempt(readLedger(this.path)).has(attemptId)) throw new Error("Attempt ID already exists in the ledger");
     const reservation: LedgerReservation = {
       ledgerVersion: 1,
@@ -474,7 +606,7 @@ export class ContractSpikeLedger {
 export function parseNonnegativeHeader(value: string | null): number | null {
   if (value === null || value.trim() === "") return null;
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  return Number.isFinite(parsed) && parsed >= 0 && !Object.is(parsed, -0) ? parsed : null;
 }
 
 export function classifyHttpOutcome(status: number, validEnvelope: boolean): Exclude<AttemptOutcome, "pending"> {
@@ -484,4 +616,59 @@ export function classifyHttpOutcome(status: number, validEnvelope: boolean): Exc
   if ([408, 500, 502, 503, 504].includes(status)) return "transient-error";
   if (status < 200 || status >= 300) return "request-error";
   return validEnvelope ? "success" : "invalid-response";
+}
+
+export interface ContractSpikeLock {
+  readonly path: string;
+  release(): void;
+}
+
+export function acquireContractSpikeLock(path: string, now: () => Date = () => new Date()): ContractSpikeLock {
+  ensurePrivateDirectory(dirname(path));
+  let descriptor: number;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+  } catch {
+    throw new Error("Contract-spike lock is already held or unsafe; live mode remains disabled");
+  }
+
+  let descriptorStat: Stats;
+  try {
+    descriptorStat = fstatSync(descriptor);
+    assertSafeRegularFile(descriptorStat);
+    writeSync(descriptor, `${JSON.stringify({ lockVersion: 1, pid: process.pid, startedAt: now().toISOString() })}\n`);
+    fsyncSync(descriptor);
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+
+  let released = false;
+  return {
+    path,
+    release() {
+      if (released) throw new Error("Contract-spike lock was already released");
+      released = true;
+      closeSync(descriptor);
+      const pathStat = lstatOrNull(path);
+      if (
+        !pathStat ||
+        pathStat.isSymbolicLink() ||
+        !pathStat.isFile() ||
+        pathStat.dev !== descriptorStat.dev ||
+        pathStat.ino !== descriptorStat.ino
+      ) {
+        throw new Error("Contract-spike lock changed while held and was not removed");
+      }
+      try {
+        unlinkSync(path);
+      } catch {
+        throw new Error("Contract-spike lock could not be removed safely");
+      }
+    },
+  };
 }

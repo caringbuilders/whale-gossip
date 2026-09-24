@@ -3,11 +3,10 @@
  * These tests never contact Nansen and do not validate provider behavior.
  */
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -24,6 +23,7 @@ import {
   requestFingerprint,
   summarizeDexTradesResponse,
 } from "../lib/server/nansen-contract";
+import { resolveSpikePaths, runSpikeCommand } from "../lib/server/nansen-spike-runner";
 
 const TOKEN = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const TRADER = `0x${"ab".repeat(20)}`;
@@ -87,17 +87,22 @@ test("hard allowlist rejects every other endpoint", () => {
 
 test("command defaults to an offline dry-run and does not create a ledger", async () => {
   const directory = await mkdtemp(join(tmpdir(), "whale-gossip-dry-run-"));
-  const executable = join(process.cwd(), "node_modules", ".bin", "tsx");
-  const result = spawnSync(executable, [join(process.cwd(), "scripts", "nansen-contract-spike.ts")], {
-    cwd: directory,
-    encoding: "utf8",
-    env: { ...process.env, NANSEN_API_KEY: "must-not-be-needed-for-dry-run" },
+  const paths = resolveSpikePaths(directory);
+  let fetchCalls = 0;
+  const output = await runSpikeCommand([], {
+    paths,
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("offline test fetch must not run");
+    },
   });
 
-  assert.equal(result.status, 0, result.stderr);
-  const output = JSON.parse(result.stdout) as { mode: string; networkRequestSent: boolean };
-  assert.deepEqual(output, { ...output, mode: "dry-run", networkRequestSent: false });
-  assert.equal(result.stderr, "");
+  assert.equal(output.mode, "dry-run");
+  assert.equal(output.networkRequestSent, false);
+  assert.equal(fetchCalls, 0);
+  assert.equal(existsSync(paths.ledger), false);
+  assert.equal(existsSync(paths.lock), false);
+  assert.equal(existsSync(paths.rawDirectory), false);
 });
 
 test("durable ledger reserves before settlement, enforces the attempt cap, and stays sanitized", async () => {
@@ -158,7 +163,7 @@ test("unknown charges retain the reservation conservatively", async () => {
 test("malformed or contradictory ledger history fails closed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "whale-gossip-ledger-malformed-"));
   const ledgerPath = join(directory, "ledger.jsonl");
-  writeFileSync(ledgerPath, '{"ledgerVersion":1,"phase":"reserved","attemptId":"truncated"}\n');
+  writeFileSync(ledgerPath, '{"ledgerVersion":1,"phase":"reserved","attemptId":"truncated"}\n', { mode: 0o600 });
   assert.throws(() => new ContractSpikeLedger(ledgerPath).summarize(), /malformed at line 1/);
 
   const cleanPath = join(directory, "history.jsonl");
@@ -166,6 +171,68 @@ test("malformed or contradictory ledger history fails closed", async () => {
   const ledger = new ContractSpikeLedger(cleanPath, undefined, () => "duplicate-id");
   ledger.reserve(fingerprint, { page: 1, perPage: 3 });
   assert.throws(() => ledger.reserve(fingerprint, { page: 1, perPage: 3 }), /already exists/);
+});
+
+test("retained-credit cap blocks another reservation before the attempt cap", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-retained-cap-"));
+  const ledger = new ContractSpikeLedger(join(directory, "ledger.jsonl"), undefined, () => "retained-cap");
+  const reservation = ledger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 });
+  ledger.settle(reservation, {
+    httpStatus: 200,
+    latencyMs: 1,
+    reportedCreditCost: 5,
+    reportedCreditsUsed: 5,
+    outcome: "success",
+  });
+  assert.throws(() => ledger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 }), /retained-credit cap/);
+});
+
+test("double settlement and out-of-order ledger history fail closed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-ledger-order-"));
+  const ledgerPath = join(directory, "ledger.jsonl");
+  const ledger = new ContractSpikeLedger(ledgerPath, undefined, () => "ordered-attempt");
+  const reservation = ledger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 });
+  ledger.settle(reservation, {
+    httpStatus: 200,
+    latencyMs: 1,
+    reportedCreditCost: 1,
+    reportedCreditsUsed: 1,
+    outcome: "success",
+  });
+  assert.throws(
+    () =>
+      ledger.settle(reservation, {
+        httpStatus: 200,
+        latencyMs: 1,
+        reportedCreditCost: 1,
+        reportedCreditsUsed: 1,
+        outcome: "success",
+      }),
+    /already settled/,
+  );
+
+  const lines = readFileSync(ledgerPath, "utf8").trim().split("\n");
+  writeFileSync(ledgerPath, `${lines.toReversed().join("\n")}\n`, { mode: 0o600 });
+  assert.throws(() => ledger.summarize(), /invalid attempt history at line 1/);
+});
+
+test("ledger and parent symlinks fail closed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-symlink-"));
+  const target = join(directory, "target.jsonl");
+  writeFileSync(target, "", { mode: 0o600 });
+  const ledgerPath = join(directory, "ledger.jsonl");
+  symlinkSync(target, ledgerPath);
+  assert.throws(() => new ContractSpikeLedger(ledgerPath).summarize(), /unsafe/);
+
+  const realParent = join(directory, "real-parent");
+  mkdirSync(realParent, { mode: 0o700 });
+  const linkedParent = join(directory, "linked-parent");
+  symlinkSync(realParent, linkedParent, "dir");
+  const linkedLedger = new ContractSpikeLedger(join(linkedParent, "ledger.jsonl"));
+  assert.throws(
+    () => linkedLedger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 }),
+    /unsafe parent/,
+  );
 });
 
 test("synthetic response parsing reports shape without leaking response values", () => {
@@ -193,6 +260,16 @@ test("malformed synthetic response is summarized without throwing", () => {
   assert.deepEqual(summary.issues, ["data-contains-non-object-records", "pagination-shape-is-invalid"]);
 });
 
+test("signed-zero observed USD is rejected by the contract summary", () => {
+  const value = syntheticResponse();
+  value.data[0].estimated_value_usd = -0;
+  const summary = summarizeDexTradesResponse(value);
+  assert.equal(summary.validEnvelope, false);
+  assert.equal(summary.observations.estimatedUsdValues.numbers, 0);
+  assert.equal(summary.observations.estimatedUsdValues.negative, 1);
+  assert.deepEqual(summary.issues, ["invalid-estimated-value-usd:signed-zero"]);
+});
+
 test("HTTP outcome classification stops on auth and credit errors and retries only transient statuses", () => {
   assert.equal(classifyHttpOutcome(200, true), "success");
   assert.equal(classifyHttpOutcome(200, false), "invalid-response");
@@ -201,5 +278,6 @@ test("HTTP outcome classification stops on auth and credit errors and retries on
   assert.equal(classifyHttpOutcome(403, false), "authorization-or-credit-error");
   assert.equal(classifyHttpOutcome(429, false), "rate-limited");
   for (const status of [408, 500, 502, 503, 504]) assert.equal(classifyHttpOutcome(status, false), "transient-error");
+  for (const status of [300, 301, 302, 307, 308, 399]) assert.equal(classifyHttpOutcome(status, false), "request-error");
   assert.equal(classifyHttpOutcome(422, false), "request-error");
 });
