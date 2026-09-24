@@ -64,6 +64,8 @@ Public clues express event timing relatively and trade size through broad review
 
 Ten synthetic inputs are held in a clearly private server module and compiled through this rules module. Five are selected deterministically. The initial page receives only question payloads; `POST /api/guess` accepts a server-owned round ID plus a valid guess and performs the private lookup before serializing the reveal. Tests traverse public keys, search for unique private sentinels and exact source values, and enforce that the client component does not import the private module.
 
+The private fixture module also imports Next.js's `server-only` marker so the framework rejects a client dependency on it. Question serialization is tested for answer independence by recompiling every private round with different answer-window evidence and a different action, then requiring byte-identical public question JSON. This protects against future leaks under field names that are not on the forbidden-key list.
+
 This is an offline demonstration boundary, not authentication or anti-cheat protection. A user with repository or server access can inspect the invented deck, and a distinctive sequence from a future real deck could still be correlated with public chain history. The current implementation neither claims anonymity nor authorizes real-round publication.
 
 ## Future acquisition-adapter guarantees

@@ -1,5 +1,6 @@
 import Game from "./game";
 import { getPublicOfflineGame } from "../lib/server/synthetic-rounds";
+import Link from "next/link";
 
 export default function Home() {
   const questions = getPublicOfflineGame();
@@ -27,7 +28,13 @@ export default function Home() {
         <h2 id="boundary-title">History-shaped clues, fictional records.</h2>
         <p>The browser receives pseudonyms, relative times, and broad size bands. Exact synthetic wallet identities, transaction details, timestamps, values, and answers stay on the server side until a guess is submitted.</p>
       </aside>
-      <footer><span>Powered by Nansen API</span><span>Synthetic offline demo · Not investment advice</span></footer>
+      <footer className="site-footer">
+        <div>
+          <p>Built for the Nansen API · This offline demo uses synthetic data, not Nansen data.</p>
+          <p>Synthetic offline demo · Not investment advice</p>
+        </div>
+        <nav aria-label="Legal pages"><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></nav>
+      </footer>
     </main>
   );
 }

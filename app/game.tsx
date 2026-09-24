@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  beginSubmission,
+  createSubmissionGate,
+  finishSubmission,
+  invalidateSubmissions,
+  isSubmissionCurrent,
+  parseGuessApiResponse,
+} from "../lib/game/client-contract";
 import { displayAction, type GuessApiResponse, type PublicQuestion, type PublicReveal } from "../lib/game/public-types";
 import type { Guess } from "../lib/rules";
 
@@ -23,15 +31,20 @@ export default function Game({ questions }: GameProps) {
   const [finished, setFinished] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const feedbackRef = useRef<HTMLDivElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
+  const submissionGateRef = useRef(createSubmissionGate());
   const question = questions[roundIndex];
 
   useEffect(() => {
-    if (reveal) feedbackRef.current?.focus();
+    if (reveal) nextButtonRef.current?.focus();
   }, [reveal]);
 
   async function submitGuess(guess: Guess) {
-    if (pending || reveal || !question) return;
+    if (reveal || !question) return;
+    const submissionToken = beginSubmission(submissionGateRef.current);
+    if (!submissionToken) return;
+
+    const submittedRoundId = question.roundId;
     setPending(true);
     setError(null);
 
@@ -39,24 +52,38 @@ export default function Game({ questions }: GameProps) {
       const response = await fetch("/api/guess", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ roundId: question.roundId, guess }),
+        body: JSON.stringify({ roundId: submittedRoundId, guess }),
       });
-      const result = (await response.json()) as GuessApiResponse;
+      const rawResult: unknown = await response.json();
+      if (!isSubmissionCurrent(submissionGateRef.current, submissionToken)) return;
+
+      const result: GuessApiResponse | null = parseGuessApiResponse(rawResult);
+      if (!result || response.ok !== result.ok) {
+        setError("The offline reveal response was invalid. Try this choice again.");
+        return;
+      }
       if (!result.ok) {
         setError(result.error.message);
+        return;
+      }
+      if (result.reveal.roundId !== submittedRoundId || result.reveal.guess !== guess) {
+        setError("The offline reveal did not match this round. Try this choice again.");
         return;
       }
       setReveal(result.reveal);
       setScore((current) => current + result.reveal.points);
     } catch {
-      setError("The offline reveal could not be loaded. Try this choice again.");
+      if (isSubmissionCurrent(submissionGateRef.current, submissionToken)) {
+        setError("The offline reveal could not be loaded. Try this choice again.");
+      }
     } finally {
-      setPending(false);
+      if (finishSubmission(submissionGateRef.current, submissionToken)) setPending(false);
     }
   }
 
   function advance() {
     if (!reveal) return;
+    invalidateSubmissions(submissionGateRef.current);
     if (roundIndex === questions.length - 1) {
       setFinished(true);
       requestAnimationFrame(() => headingRef.current?.focus());
@@ -69,6 +96,7 @@ export default function Game({ questions }: GameProps) {
   }
 
   function replay() {
+    invalidateSubmissions(submissionGateRef.current);
     setRoundIndex(0);
     setScore(0);
     setReveal(null);
@@ -109,7 +137,7 @@ export default function Game({ questions }: GameProps) {
     <section className="game-card" aria-labelledby="round-title">
       <div className="round-meta">
         <p className="eyebrow">Round {question.roundNumber} of {questions.length}</p>
-        <p className="score" aria-label={`Current score ${score}`}>Score {score}</p>
+        <p className="score">Score {score}</p>
       </div>
       <div className="progress" aria-hidden="true">
         {questions.map((item, index) => <span className={index <= roundIndex ? "active" : ""} key={item.roundId} />)}
@@ -160,19 +188,24 @@ export default function Game({ questions }: GameProps) {
       </div>
 
       {error ? <p className="error-message" role="alert">{error}</p> : null}
-      <p className="submission-status" aria-live="polite">{pending ? "Checking the synthetic record…" : ""}</p>
-
-      {reveal ? (
-        <div className={`reveal ${reveal.correct ? "correct" : "incorrect"}`} ref={feedbackRef} tabIndex={-1} aria-live="polite">
-          <p className="verdict">{reveal.correct ? "Correct · +1 point" : "Not this time · 0 points"}</p>
-          <h2>The recorded action was {reveal.recordedAction}.</h2>
-          <p>{reveal.relativeElapsedTime}{reveal.sizeBand ? ` · ${reveal.sizeBand}` : ""}</p>
-          <p>{reveal.explanation}</p>
-          <button className="primary-button" type="button" onClick={advance}>
+      <div className={reveal ? `reveal ${reveal.correct ? "correct" : "incorrect"}` : "submission-status"}>
+        <div aria-live="polite" aria-atomic="true">
+          {pending ? <p>Checking the synthetic record…</p> : null}
+          {reveal ? (
+            <>
+              <p className="verdict">{reveal.correct ? "Correct · +1 point" : "Not this time · 0 points"}</p>
+              <h2>The recorded action was {reveal.recordedAction}.</h2>
+              <p>{reveal.relativeElapsedTime}{reveal.sizeBand ? ` · ${reveal.sizeBand}` : ""}</p>
+              <p>{reveal.explanation}</p>
+            </>
+          ) : null}
+        </div>
+        {reveal ? (
+          <button className="primary-button" type="button" onClick={advance} ref={nextButtonRef}>
             {roundIndex === questions.length - 1 ? "See final score" : "Next round"}
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </section>
   );
 }

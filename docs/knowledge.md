@@ -141,3 +141,13 @@ Serialization tests need both structural and value checks. Forbidden-key travers
 Ordinary numeric zero remains valid but nonmaterial and invisible in the question because answer-window events are never serialized. Numeric negative zero still fails through rules version 4. Broad size bands and relative time descriptions are derived only after compilation and do not modify scoring evidence.
 
 The user verified a Nansen dashboard balance of **1,092 credits after the three-call spike**. This is manual dashboard evidence, distinct from the ignored local ledger's three reported credits and not a balance inferred by code. The synthetic-game milestone makes zero Nansen calls and consumes zero credits. Real acquisition still requires resolution of the existing direction, leg identity, USD, pagination, boundary, completeness, and redistribution questions.
+
+## Synthetic-game hardening knowledge — September 24, 2026
+
+Value and key scans do not fully prove answer independence: a future developer could add a harmless-looking field derived from the correct action. Recompiling the same pre-cutoff evidence with a different answer and asserting byte-identical question JSON catches that class of leak without relying on a forbidden field name.
+
+React state does not synchronously close a rapid double-click window. A mutable ref gate can reserve the request before the first await or rerender. Pair the request ID with a game generation so replay or round advancement invalidates late responses, and validate returned JSON plus the submitted round/guess before applying score.
+
+Next.js supports a bare `server-only` marker and rejects its import from the client graph. Direct Node tests do not run under Next's resolver, so the test command registers a narrow test-only mapping for exactly that marker. This adds no package and leaves the production framework enforcement intact.
+
+Public policy text must match actual collection rather than saying no personal information is ever processed. The current app intentionally has no accounts, wallet connection, email capture, advertising identifiers, analytics, or gameplay persistence, while hosting infrastructure may still process IP/device/request logs. Revisit Terms and Privacy before the data model, hosting, analytics, persistence, or live mode changes.

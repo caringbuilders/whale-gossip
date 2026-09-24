@@ -58,6 +58,14 @@ The `/api/guess` boundary accepts no caller-supplied events, provider endpoints,
 
 The game uses the accepted rules version 4 without changing scoring or provider-spike code. All fixtures are invented contract tests and UI content; none is a Nansen observation, a reviewed historical round, or evidence of provider completeness. The milestone installs no packages, makes no provider call, and consumes no credits.
 
+## Synthetic-game hardening and public-policy decision — September 24, 2026
+
+Private fixtures now use the framework-supported `server-only` import. The client treats server JSON as unknown, accepts only the complete allowlisted response shape, and ties each response to its submitted round, guess, request ID, and game generation. A ref-based gate closes the immediate double-activation interval before React state rerenders.
+
+Question serialization must be answer-independent by construction and regression test: changing all answer-window events and the resulting answer while keeping pre-cutoff evidence fixed must produce identical question bytes. Fixed expected actions across every played round and guess protect scoring tests from self-confirming mutations.
+
+The current offline release includes `/terms` and `/privacy` with an effective date of September 24, 2026. Both pages, working footer links, the short no-advice notice, accurate collection language, and clear synthetic-data attribution are prerequisites for public deployment. Re-review and update the policies before accounts, analytics, Supabase persistence, production live mode, new hosting/logging practices, or any other collection. No consent banner is introduced because this milestone adds no optional cookies or application analytics.
+
 ## Offline skeleton milestone — September 22, 2026
 
 The authorized first application step is a static App Router landing page only. It explains the future game without rounds, results, or simulated live functionality. No API routes, authentication, database clients, or acquisition scripts are introduced. Plain CSS and system fonts keep the page self-contained; Next.js telemetry is disabled in npm scripts.

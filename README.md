@@ -2,7 +2,7 @@
 
 Whale Gossip is a five-round Ethereum guessing game. The current playable deck is an **explicitly synthetic offline demo**: read a fictional wallet's five-trade tape, choose Buy, Sell, or No trade for the next 48 hours, then reveal the deterministic result. It is a game about historical-style evidence, not investment advice.
 
-The interface attributes the project as “Powered by Nansen API,” but this deck does not contain Nansen observations and gameplay makes no Nansen or other external request. The bounded provider contract spike is separate historical evidence recorded in `docs/nansen-contract-spike.md`. Real acquired rounds, live mode, persistence, authentication, and deployment remain future work.
+The interface says: “Built for the Nansen API · This offline demo uses synthetic data, not Nansen data.” The bounded provider contract spike is separate historical evidence recorded in `docs/nansen-contract-spike.md`. Real acquired rounds, live mode, persistence, authentication, and deployment remain future work.
 
 ## Local setup
 
@@ -25,6 +25,12 @@ Open **http://localhost:3000**. The development server binds to loopback. Stop i
 - `app/game.tsx` receives question payloads only. Private identifiers, exact values and times, source events, and outcomes are not passed as initial client props.
 
 This is an offline demonstration boundary rather than authentication or an anti-cheat system. Someone with repository or server access can inspect the fictional source deck.
+
+## Public policies and release prerequisites
+
+The current offline release includes public Terms of Use at `/terms` and a Privacy Notice at `/privacy`, both effective September 24, 2026. They describe the synthetic educational game, its no-advice boundary, the absence of accounts/application analytics/persistence, and possible infrastructure logs.
+
+Before any public deployment, confirm those pages remain reachable and accurate alongside the client-payload, credential, accessibility, and runtime checks in `docs/status.md`. Reconsider and update them before adding accounts, analytics, Supabase persistence, production Nansen live mode, new hosting/data practices, or other collection. These project pages are not a substitute for qualified legal review when one is needed.
 
 ## Checks
 

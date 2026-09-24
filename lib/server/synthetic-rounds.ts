@@ -5,6 +5,8 @@
  * timestamps, source events, compiled answers, and outcome evidence. Client
  * components must only receive the allowlisted serializer output.
  */
+import "server-only";
+
 import {
   ANSWER_WINDOW_MS,
   LOOKBACK_MS,
