@@ -18,7 +18,9 @@ This public summary records aggregate evidence supplied after the bounded Whale 
 | Failure reasons | 0 |
 | Private candidates | 1 |
 
-The discovery calls identified one private candidate. Candidate-specific acquisition then tested whether wallet-filtered history could provide the complete evidence required by Whale Gossip's deterministic rules. The supplied evidence says the wallet filter was consistently enforced across all 91 coverage pages, making the run useful contract and pagination evidence.
+The discovery calls identified one private candidate. Every coverage call requested the next sequential page needed for the proposed 32-day candidate window; the requests were not identical repeats. Early pages established consistent `trader_address` enforcement and extremely dense activity. Once completion appeared unlikely within the available budget, the user separately authorized continued sequential coverage until the chosen Academy 100-call stop condition.
+
+Later pages continued to demonstrate wallet/token consistency and extreme page density, but added limited diversity beyond that evidence. This summary does not claim that all 91 pages were equally necessary, uniquely informative, or sufficient for useful completed coverage.
 
 Coverage page 91 was still nonterminal. The relevant pagination was not exhausted, so coverage remained incomplete. No real round compiled, no real answer became publishable, and the public five-round game continues to use explicitly synthetic deterministic fixtures. Reaching an API-call threshold does not prove eligibility, complete coverage, or a real round.
 
@@ -33,9 +35,11 @@ Direction semantics, stable leg identity, terminal pagination behavior, complete
 
 ## Credit reconciliation
 
-The historical post-spike dashboard balance was **1,092 credits** and the supplied final balance was **995 credits**. The difference is exactly **97 credits**, matching the 97 reported acquisition credits.
+The original pre-spike dashboard balance was **1,095 credits**. Three spike credits explain the historical post-spike balance: **1,095 − 3 = 1,092**.
 
-A transient earlier dashboard reading of **1,095 credits** remains unexplained. It is not treated as evidence of extra usage, replenishment, or a different current balance.
+A separate later pre-discovery reading also displayed **1,095 credits**, although the expected post-spike balance was 1,092. That later reading remains unexplained and transient; it is not evidence of additional use or replenishment. The post-discovery reading of **1,086** equals **1,092 − 6**.
+
+Final reconciliation remains **1,092 post-spike − 97 acquisition credits = 995**.
 
 ## Privacy boundary
 

@@ -8,7 +8,7 @@ The current public deck uses **explicitly synthetic, deterministic fixtures**. I
 
 The private Nansen integration successfully logged **100 total API calls**: three bounded contract-spike calls and 97 acquisition calls. The acquisition calls consisted of six discovery calls and 91 candidate-specific coverage calls.
 
-One wallet-filtered candidate reached coverage page 91, and the wallet filter was consistently enforced across the supplied coverage evidence. Page 91 was still nonterminal. Complete coverage was therefore not obtained, the candidate remained unscorable, and no real round was published. API-call count alone does not prove a complete or publishable round.
+One wallet-filtered candidate reached coverage page 91. Each call requested the next sequential page required for its proposed 32-day window; the requests were not identical repeats. Early pages established consistent wallet-filter enforcement and extremely dense activity. Once completion appeared unlikely within the available budget, the user separately authorized continuing sequential coverage to the chosen Academy 100-call stop condition. Later pages continued to show wallet/token consistency and extreme density, but added limited diversity beyond that evidence. Page 91 was still nonterminal, so the candidate remained unscorable and no real round was published. API-call count alone does not prove a complete or publishable round.
 
 The current Nansen Academy page says **100+ calls**, while an older campaign page says **1,000 calls**. That discrepancy remains unresolved and should be reconciled with the organizer.
 
