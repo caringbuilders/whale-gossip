@@ -16,6 +16,7 @@ import {
   normalizeCompletePages,
   parseProviderPage,
   summarizeDiscoveryPage,
+  validateCoveragePage,
   type DiscoveredCandidate,
   type PlannedRequest,
   type ProviderPage,
@@ -304,6 +305,74 @@ test("discovery evidence counts invalid and duplicate rows without exposing iden
   assert.doesNotMatch(serialized, /0x|PRIVATE|25000|2026-/i);
 });
 
+test("coverage pages enforce wallet and token matches with canonical address comparison", () => {
+  const plan = coveragePlan();
+  const mixedCase = row({
+    trader_address: WALLET.toUpperCase().replace("0X", "0x"),
+    token_address: TOKEN.address.toUpperCase().replace("0X", "0x"),
+  });
+  const accepted = validateCoveragePage(parsedPage(1, [mixedCase], false), plan, 1, 300);
+  assert.equal(accepted.status, "accepted");
+  assert.deepEqual(accepted.evidence, {
+    rowCount: 1,
+    walletMatchCount: 1,
+    tokenMatchCount: 1,
+    structurallyValidRowCount: 1,
+    structurallyInvalidRowCount: 0,
+    rejectionReason: null,
+    timeSpanBand: "under-1-hour",
+    pagination: { page: 1, perPage: 100, isLastPage: false },
+    reportedCreditCost: 1,
+    latencyBand: "250-ms-to-1-second",
+  });
+
+  const wrongWallet = validateCoveragePage(
+    parsedPage(1, [row({ trader_address: OTHER_WALLET.toUpperCase().replace("0X", "0x") })], false),
+    plan,
+    1,
+    100,
+  );
+  assert.equal(wrongWallet.status, "rejected");
+  assert.equal(wrongWallet.evidence.walletMatchCount, 0);
+  assert.equal(wrongWallet.evidence.rejectionReason, "wallet-filter-not-applied");
+
+  const wrongToken = validateCoveragePage(
+    parsedPage(1, [row({ token_address: OTHER_WALLET })], false),
+    plan,
+    1,
+    100,
+  );
+  assert.equal(wrongToken.status, "rejected");
+  assert.equal(wrongToken.evidence.walletMatchCount, 1);
+  assert.equal(wrongToken.evidence.tokenMatchCount, 0);
+  assert.equal(wrongToken.evidence.rejectionReason, "wallet-filter-not-applied");
+  assert.equal(
+    compileCoveredCandidate(candidate(), { status: "rejected", reason: wrongToken.reason }).compilerResult,
+    null,
+  );
+});
+
+test("coverage pages reject invalid rows immediately while empty pages remain provisional evidence", () => {
+  const plan = coveragePlan();
+  const invalid = validateCoveragePage(
+    parsedPage(1, [row({ transaction_hash: "invalid" })], false),
+    plan,
+    1,
+    100,
+  );
+  assert.equal(invalid.status, "rejected");
+  assert.equal(invalid.evidence.structurallyInvalidRowCount, 1);
+  assert.equal(invalid.evidence.rejectionReason, "invalid-coverage-row");
+
+  for (const terminal of [false, true]) {
+    const empty = validateCoveragePage(parsedPage(1, [], terminal), plan, 1, 100);
+    assert.equal(empty.status, "accepted");
+    assert.equal(empty.evidence.rowCount, 0);
+    assert.equal(empty.evidence.rejectionReason, null);
+    assert.equal(empty.evidence.pagination.isLastPage, terminal);
+  }
+});
+
 function completeCandidateRows(answerRows: readonly Record<string, unknown>[] = []): Record<string, unknown>[] {
   return [
     row({ block_timestamp: new Date(CUTOFF - 6 * DAY).toISOString(), transaction_hash: hash(1), estimated_value_usd: 25_000 }),
@@ -419,7 +488,7 @@ test("request fingerprints include version, purpose, page, and candidate wallet 
 
 test("sanitized report allowlist drops injected private fields", () => {
   const report = buildSanitizedAcquisitionReport({
-    reportVersion: 2,
+    reportVersion: 3,
     discoveryCalls: 1,
     coverageCalls: 2,
     rows: 3,
@@ -445,6 +514,29 @@ test("sanitized report allowlist drops injected private fields", () => {
         wallet: WALLET,
       } as never,
     ],
+    coveragePages: [
+      {
+        rowCount: 1,
+        walletMatchCount: 0,
+        tokenMatchCount: 1,
+        structurallyValidRowCount: 1,
+        structurallyInvalidRowCount: 0,
+        rejectionReason: "wallet-filter-not-applied",
+        timeSpanBand: "under-1-hour",
+        pagination: { page: 1, perPage: 100, isLastPage: false },
+        reportedCreditCost: 1,
+        latencyBand: "under-250-ms",
+        wallet: WALLET,
+        token: TOKEN.address,
+        hash: hash(91),
+        label: "PRIVATE COVERAGE LABEL",
+        exactTimestamp: "2026-01-01T00:00:00.000Z",
+        exactValue: 25_000,
+        requestBody: { filters: { trader_address: WALLET } },
+        rawRow: row(),
+        key: "SYNTHETIC-PRIVATE-KEY",
+      } as never,
+    ],
     wallet: WALLET,
     hash: hash(90),
     label: "PRIVATE",
@@ -452,7 +544,7 @@ test("sanitized report allowlist drops injected private fields", () => {
     exactTimestamp: "2026-01-01T00:00:00.000Z",
   } as never);
   const serialized = JSON.stringify(report);
-  for (const forbidden of [WALLET, hash(90), "PRIVATE", "25000", "2026-"]) {
+  for (const forbidden of [WALLET, TOKEN.address, hash(90), hash(91), "PRIVATE", "25000", "2026-"]) {
     assert.doesNotMatch(serialized, new RegExp(forbidden, "i"));
   }
 });

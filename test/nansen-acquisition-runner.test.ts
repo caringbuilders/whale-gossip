@@ -185,6 +185,7 @@ test("an unknown charge retains its reservation in direct ledger accounting", ()
     unknownChargeAttempts: 1,
     retainedCredits: 1,
     combinedSuccessfulCalls: 3,
+    failureReasons: { "invalid-coverage-row": 0, "wallet-filter-not-applied": 0 },
   });
 });
 
@@ -312,6 +313,105 @@ test("a ten-call pilot samples all windows then independently covers two same-cu
   assert.equal(new Set(coverage.map((work) => work.cutoffMs)).size, 1);
 });
 
+test("an ignored wallet filter stops after the first nonterminal coverage attempt", async () => {
+  const paths = temporaryPaths("whale-acquisition-ignored-filter-");
+  const candidateWallets = [`0x${"1".repeat(40)}`, `0x${"2".repeat(40)}`];
+  const wrongWallet = `0x${"9".repeat(40)}`;
+  const privateHash = `0x${"f".repeat(64)}`;
+  const privateLabel = "PRIVATE SYNTHETIC FILTER LABEL";
+  const privateKey = "SYNTHETIC-PRIVATE-KEY";
+  const requests: ReturnType<typeof requestFromBody>[] = [];
+  let fetchCalls = 0;
+  let errorText = "";
+  await assert.rejects(
+    runLiveAcquisition({
+      paths,
+      apiKey: privateKey,
+      maxNewCalls: 10,
+      targetTotalSuccess: 120,
+      fetchImpl: async (_input, init) => {
+        fetchCalls += 1;
+        const request = requestFromBody(init);
+        requests.push(request);
+        if (!request.filters) {
+          const timestamp = new Date(Date.parse(request.date.from) + 1).toISOString();
+          return providerResponse(request.pagination.page, false, [
+            providerRow(candidateWallets[0], timestamp, String(fetchCalls)),
+            providerRow(candidateWallets[1], timestamp, String(fetchCalls + 3)),
+          ]);
+        }
+        return providerResponse(request.pagination.page, false, [
+          {
+            ...providerRow(wrongWallet, "2026-09-01T00:00:00.000Z", "f"),
+            transaction_hash: privateHash,
+            trader_address_label: privateLabel,
+            estimated_value_usd: 25_000,
+          },
+        ]);
+      },
+      now: () => FIXED_NOW,
+      monotonicNow: () => 0,
+      sleep: async () => undefined,
+      createAttemptId: ids("ignored-filter"),
+    }),
+    (error: unknown) => {
+      errorText = error instanceof Error ? error.message : String(error);
+      return /coverage-page rejection: wallet-filter-not-applied/.test(errorText);
+    },
+  );
+
+  assert.equal(fetchCalls, 4);
+  assert.equal(requests.filter((request) => request.filters === undefined).length, 3);
+  assert.equal(requests.filter((request) => request.filters !== undefined).length, 1);
+  assert.equal(requests[3].pagination.page, 1);
+
+  const ledger = summarizeAcquisitionLedger(paths.ledger);
+  assert.equal(ledger.attempts, 4);
+  assert.equal(ledger.discoveryAttempts, 3);
+  assert.equal(ledger.coverageAttempts, 1);
+  assert.equal(ledger.successful, 3);
+  assert.equal(ledger.combinedSuccessfulCalls, 6);
+  assert.equal(ledger.reportedCreditsUsed, 4);
+  assert.equal(ledger.retainedCredits, 4);
+  assert.equal(ledger.failureReasons["wallet-filter-not-applied"], 1);
+  const ledgerFile = JSON.parse(readFileSync(paths.ledger, "utf8")) as {
+    attempts: Array<{ phase: string; purpose: string; outcome: string; failureReason: string | null }>;
+  };
+  const rejectedAttempt = ledgerFile.attempts.findLast(
+    (attempt) => attempt.phase === "settled" && attempt.purpose === "coverage",
+  );
+  assert.ok(rejectedAttempt);
+  assert.equal(rejectedAttempt.outcome, "invalid-response");
+  assert.equal(rejectedAttempt.failureReason, "wallet-filter-not-applied");
+
+  const report = JSON.parse(readFileSync(paths.aggregateReport, "utf8")) as {
+    successes: number;
+    coveragePages: Array<Record<string, unknown>>;
+  };
+  assert.equal(report.successes, 3);
+  assert.deepEqual(report.coveragePages, [
+    {
+      rowCount: 1,
+      walletMatchCount: 0,
+      tokenMatchCount: 1,
+      structurallyValidRowCount: 1,
+      structurallyInvalidRowCount: 0,
+      rejectionReason: "wallet-filter-not-applied",
+      timeSpanBand: "under-1-hour",
+      pagination: { page: 1, perPage: 100, isLastPage: false },
+      reportedCreditCost: 1,
+      latencyBand: "under-250-ms",
+    },
+  ]);
+  const state = JSON.parse(readFileSync(paths.state, "utf8")) as { results: unknown[] };
+  assert.deepEqual(state.results, []);
+
+  const sanitized = `${JSON.stringify(report)} ${errorText}`;
+  for (const forbidden of [wrongWallet, ACQUISITION_TOKEN_UNIVERSE[0].address, privateHash, privateLabel, "25000", "2026-", privateKey]) {
+    assert.doesNotMatch(sanitized, new RegExp(forbidden, "i"));
+  }
+});
+
 test("a requested run allowance larger than remaining global capacity fails before fetch", async () => {
   const paths = temporaryPaths("whale-acquisition-remaining-");
   const ledger = new AcquisitionLedger(paths.ledger, () => FIXED_NOW, ids("remaining"));
@@ -382,7 +482,7 @@ test("cache hits complete deterministic discovery work without an upstream call"
     writeFileSync(
       join(paths.cacheDirectory, `${fingerprint}.json`),
       `${JSON.stringify({
-        cacheVersion: 2,
+        cacheVersion: 3,
         fingerprint,
         retrievalTimeMs: FIXED_NOW.getTime(),
         requestId: `cached-${fingerprint.slice(0, 8)}`,
@@ -482,7 +582,7 @@ test("a lock held by another process blocks scratch acquisition before reserve o
 });
 
 test("malformed and truncated private workflow state fail closed before fetch", async () => {
-  for (const [name, state] of [["malformed", "{}\n"], ["truncated", '{"stateVersion":2']] as const) {
+  for (const [name, state] of [["malformed", "{}\n"], ["truncated", '{"stateVersion":3']] as const) {
     const paths = temporaryPaths(`whale-acquisition-state-${name}-`);
     mkdirSync(join(paths.repositoryRoot, "data", "private", "nansen-acquisition"), {
       recursive: true,

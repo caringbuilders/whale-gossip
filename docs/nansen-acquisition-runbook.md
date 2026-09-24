@@ -1,6 +1,6 @@
 # Nansen acquisition design and runbook
 
-This document describes the corrected boundary for acquiring private real-round candidates. The first design was rejected in review before it made any provider calls. Adapter/state/schema version 2 is implemented and tested only with synthetic responses and temporary private roots. Normal development, tests, dry-run, status, compilation, and the public application remain network-free.
+This document describes the corrected boundary for acquiring private real-round candidates. The first design was rejected in review before it made any provider calls. Adapter/state/schema version 3 is implemented and tested only with synthetic responses and temporary private roots. Normal development, tests, dry-run, status, compilation, and the public application remain network-free.
 
 ## Fixed provider boundary
 
@@ -8,7 +8,7 @@ The workflow permits only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. It
 
 The reviewed token universe currently contains only canonical Ethereum WETH9 at `0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2`. No other address has comparable repository evidence, so expansion to three–five non-stable tokens remains pending.
 
-The endpoint schema identified in the supplied review permits candidate coverage to add `filters.trader_address`. The value comes only from a syntactically validated and normalized discovery row; it is never CLI or browser input. Discovery requests omit this filter. Each candidate coverage request includes both the fixed token and its candidate wallet. This request shape is repository-reviewed but has not been sent to Nansen, so its live behavior, selectivity, pagination, and completeness semantics remain unverified.
+Candidate coverage provisionally adds `filters.trader_address`. The value comes only from a syntactically validated and normalized discovery row; it is never CLI or browser input. Discovery requests omit this filter. Each candidate coverage request includes both the fixed token and its candidate wallet. No tracked project source independently confirms the request field, and it has not been sent by this workflow, so provider acceptance, enforcement, selectivity, pagination, and completeness semantics remain unverified.
 
 ## Bounded discovery sampling
 
@@ -24,13 +24,15 @@ Each candidate gets an independent work ID of `coverage-${candidateId}`, includi
 
 Pages must arrive exactly once and in sequence from page 1 through validated `is_last_page=true`. Missing, duplicate, cross-page duplicate, out-of-order, prematurely terminal, nonterminal, malformed, timed-out, wallet-mismatched, or request-mismatched evidence rejects coverage. Exact duplicate candidate rows are treated as unstable pagination evidence and reject; they are never collapsed into a scorable result. Conflicting rows also reject. Events are sorted locally rather than trusting cross-page order.
 
+Every received coverage page is validated before success accounting or caching. Each row must be structurally valid and its canonical wallet and token must equal the candidate request. A different wallet or token on any terminal or nonterminal page is categorized as `wallet-filter-not-applied`, settles the attempt as `invalid-response`, preserves reported/retained credits, records only safe aggregate coverage-page evidence, and stops the run. Structurally invalid rows use `invalid-coverage-row` with the same fail-closed treatment. An empty terminal page may participate in otherwise complete pagination. An empty nonterminal page continues conservatively and does not prove the provider honored the filter.
+
 Coverage supplied to rules version 4 is derived from the work item's successfully retrieved local request bounds. A one-millisecond shortfall at either required boundary is unscorable. A provider terminal flag, discovery page, elapsed delay, or event array alone does not establish complete coverage.
 
 ## Conservative normalization and compilation
 
 Every relied-upon row field is checked at runtime. The adapter requires exact millisecond ISO UTC timestamps; valid Ethereum trader/token addresses and transaction hashes normalized to lowercase; `BUY` or `SELL`; a finite, nonnegative numeric `estimated_value_usd` that is not signed zero; the requested token; and, for coverage, the requested candidate wallet.
 
-Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 2 continues to derive private `derived-v1:<sha256>` event IDs from the canonical full provider row; the label describes the derivation format, not the adapter version or a provider guarantee. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, aggregate reports, logs, or public output.
+Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 3 continues to derive private `derived-v1:<sha256>` event IDs from the canonical full provider row; the label describes the derivation format, not the adapter version or a provider guarantee. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, aggregate reports, logs, or public output.
 
 Only complete normalized evidence is offered to `compileRound` in `lib/rules.ts`; scoring is not reimplemented in the adapter. Rejected or incomplete normalization has no coverage and cannot produce Buy, Sell, or No trade.
 
@@ -45,7 +47,7 @@ All live artifacts use ignored paths:
 
 Private directories require mode `0700`; files require `0600`, current-user ownership, regular-file types, and no symlink traversal. Atomic JSON writes use a restrictive temporary file, rename, and containing-directory `fsync` where supported. A reservation is durably written before fetch; failure to persist or directory-sync it prevents the request. Fingerprints include adapter, state, and schema versions, request purpose, page, date bounds, token, chain, flags, ordering, and candidate wallet filter. Discovery and coverage cannot share a cache identity. Cache hits make zero upstream calls and do not increment attempt, success, discovery-call, or coverage-call counters.
 
-The candidate manifest is private and contains identities and exact evidence. The aggregate report is sanitized but remains ignored by default. Acquisition never publishes fixtures. A later explicit review must use the existing public allowlist boundary and leakage tests.
+The candidate manifest is private and contains identities and exact evidence. Aggregate coverage-page records contain only row/match/structural counts, a categorical rejection reason, a coarse time-span band, returned pagination, a latency band, and reported cost. The report builder copies those fields explicitly and rejects arbitrary nested properties. The aggregate report remains ignored by default. Acquisition never publishes fixtures. A later explicit review must use the existing public allowlist boundary and leakage tests.
 
 ## Budget, failure, and recovery
 

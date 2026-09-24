@@ -31,7 +31,10 @@ import {
   normalizeCompletePages,
   parseProviderPage,
   summarizeDiscoveryPage,
+  validateCoveragePage,
   type AcquisitionToken,
+  type CoveragePageEvidence,
+  type CoveragePageRejectionReason,
   type DiscoveredCandidate,
   type DiscoveryPageEvidence,
   type PlannedRequest,
@@ -78,7 +81,7 @@ export function resolveAcquisitionPaths(repositoryRoot = ACQUISITION_REPOSITORY_
     lock: `${ledger}.lock`,
     state: join(privateRoot, "state.json"),
     rawDirectory: join(privateRoot, "raw"),
-    cacheDirectory: join(privateRoot, "cache-v2"),
+    cacheDirectory: join(privateRoot, "cache-v3"),
     candidateManifest: join(privateRoot, "candidate-manifest.json"),
     aggregateReport: join(privateRoot, "aggregate-report.json"),
   };
@@ -126,6 +129,8 @@ type AttemptOutcome =
   | "invalid-response"
   | "unexpected-pricing";
 
+type AttemptFailureReason = CoveragePageRejectionReason | null;
+
 interface AcquisitionAttempt {
   readonly attemptId: string;
   readonly phase: "reserved" | "settled";
@@ -139,10 +144,11 @@ interface AcquisitionAttempt {
   readonly reportedCreditCost: number | null;
   readonly reportedCreditsUsed: number | null;
   readonly outcome: AttemptOutcome;
+  readonly failureReason: AttemptFailureReason;
 }
 
 interface AcquisitionLedgerFile {
-  readonly ledgerVersion: 1;
+  readonly ledgerVersion: 2;
   readonly attempts: readonly AcquisitionAttempt[];
 }
 
@@ -156,6 +162,7 @@ export interface AcquisitionLedgerSummary {
   readonly unknownChargeAttempts: number;
   readonly retainedCredits: number;
   readonly combinedSuccessfulCalls: number;
+  readonly failureReasons: Readonly<Record<CoveragePageRejectionReason, number>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -251,7 +258,10 @@ function validateAttempt(value: unknown): value is AcquisitionAttempt {
     Number.isFinite(value.retainedCredits) &&
     value.retainedCredits >= 0 &&
     typeof value.recordedAt === "string" &&
-    Number.isFinite(Date.parse(value.recordedAt));
+    Number.isFinite(Date.parse(value.recordedAt)) &&
+    (value.failureReason === null ||
+      value.failureReason === "invalid-coverage-row" ||
+      value.failureReason === "wallet-filter-not-applied");
   if (!common) return false;
   if (value.phase === "reserved") {
     return (
@@ -259,7 +269,8 @@ function validateAttempt(value: unknown): value is AcquisitionAttempt {
       value.httpStatus === null &&
       value.reportedCreditCost === null &&
       value.reportedCreditsUsed === null &&
-      value.outcome === "pending"
+      value.outcome === "pending" &&
+      value.failureReason === null
     );
   }
   return (
@@ -279,14 +290,15 @@ function validateAttempt(value: unknown): value is AcquisitionAttempt {
       "request-error",
       "invalid-response",
       "unexpected-pricing",
-    ].includes(String(value.outcome))
+    ].includes(String(value.outcome)) &&
+    (value.failureReason === null || value.outcome === "invalid-response")
   );
 }
 
 function readLedger(path: string): AcquisitionLedgerFile {
   const value = readPrivateJson(path);
-  if (value === null) return { ledgerVersion: 1, attempts: [] };
-  if (!isRecord(value) || value.ledgerVersion !== 1 || !Array.isArray(value.attempts) || !value.attempts.every(validateAttempt)) {
+  if (value === null) return { ledgerVersion: 2, attempts: [] };
+  if (!isRecord(value) || value.ledgerVersion !== 2 || !Array.isArray(value.attempts) || !value.attempts.every(validateAttempt)) {
     throw new Error("Acquisition ledger is malformed");
   }
   const phases = new Map<string, string>();
@@ -311,6 +323,10 @@ export function summarizeAcquisitionLedger(path: string): AcquisitionLedgerSumma
   const latest = latestAttempts(ledger);
   const settled = latest.filter((attempt) => attempt.phase === "settled");
   const successful = settled.filter((attempt) => attempt.outcome === "success").length;
+  const failureReasons = {
+    "invalid-coverage-row": settled.filter((attempt) => attempt.failureReason === "invalid-coverage-row").length,
+    "wallet-filter-not-applied": settled.filter((attempt) => attempt.failureReason === "wallet-filter-not-applied").length,
+  };
   return {
     attempts: latest.length,
     discoveryAttempts: latest.filter((attempt) => attempt.purpose === "discovery").length,
@@ -321,6 +337,7 @@ export function summarizeAcquisitionLedger(path: string): AcquisitionLedgerSumma
     unknownChargeAttempts: settled.filter((attempt) => attempt.reportedCreditsUsed === null).length,
     retainedCredits: latest.reduce((sum, attempt) => sum + attempt.retainedCredits, 0),
     combinedSuccessfulCalls: CONTRACT_SPIKE_SUCCESSES + successful,
+    failureReasons,
   };
 }
 
@@ -369,6 +386,7 @@ export class AcquisitionLedger {
       reportedCreditCost: null,
       reportedCreditsUsed: null,
       outcome: "pending",
+      failureReason: null,
     };
     writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, reservation] }, this.durabilityHooks);
     return reservation;
@@ -381,6 +399,7 @@ export class AcquisitionLedger {
       readonly reportedCreditCost: number | null;
       readonly reportedCreditsUsed: number | null;
       readonly outcome: Exclude<AttemptOutcome, "pending">;
+      readonly failureReason?: AttemptFailureReason;
     },
   ): AcquisitionAttempt {
     const ledger = readLedger(this.path);
@@ -395,6 +414,7 @@ export class AcquisitionLedger {
       reportedCreditCost: result.reportedCreditCost,
       reportedCreditsUsed: result.reportedCreditsUsed,
       outcome: result.outcome,
+      failureReason: result.failureReason ?? null,
     };
     writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, settlement] }, this.durabilityHooks);
     return settlement;
@@ -432,10 +452,11 @@ interface WorkflowState {
   readonly results: readonly PrivateCandidateRecord[];
   readonly counters: { readonly discoveryCalls: number; readonly coverageCalls: number; readonly rows: number };
   readonly discoveryPages: readonly DiscoveryPageEvidence[];
+  readonly coveragePages: readonly CoveragePageEvidence[];
 }
 
 interface CachedPage {
-  readonly cacheVersion: 2;
+  readonly cacheVersion: 3;
   readonly fingerprint: string;
   readonly retrievalTimeMs: number;
   readonly requestId: string;
@@ -494,6 +515,7 @@ function createWorkflowState(nowMs: number): WorkflowState {
     results: [],
     counters: { discoveryCalls: 0, coverageCalls: 0, rows: 0 },
     discoveryPages: [],
+    coveragePages: [],
   };
 }
 
@@ -554,7 +576,8 @@ function validateState(value: unknown): value is WorkflowState {
     Number.isSafeInteger(value.counters.coverageCalls) &&
     typeof value.counters.rows === "number" &&
     Number.isSafeInteger(value.counters.rows) &&
-    Array.isArray(value.discoveryPages)
+    Array.isArray(value.discoveryPages) &&
+    Array.isArray(value.coveragePages)
   );
 }
 
@@ -574,7 +597,7 @@ function readCachedPage(paths: AcquisitionPaths, fingerprint: string): CachedPag
   if (value === null) return null;
   if (
     !isRecord(value) ||
-    value.cacheVersion !== 2 ||
+    value.cacheVersion !== 3 ||
     value.fingerprint !== fingerprint ||
     typeof value.retrievalTimeMs !== "number" ||
     !Number.isSafeInteger(value.retrievalTimeMs) ||
@@ -677,6 +700,13 @@ function updateAfterPage(
   };
 }
 
+function appendCoveragePageEvidence(
+  state: WorkflowState,
+  evidence: CoveragePageEvidence,
+): WorkflowState {
+  return { ...state, coveragePages: [...state.coveragePages, evidence] };
+}
+
 function selectNextWork(state: WorkflowState): WorkItem | undefined {
   const pending = state.work.filter((work) => !work.complete);
   const discoveryCallAvailable = state.counters.discoveryCalls < DISCOVERY_MAX_CALLS;
@@ -715,7 +745,7 @@ function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary)
     }
   }
   return buildSanitizedAcquisitionReport({
-    reportVersion: 2,
+    reportVersion: 3,
     discoveryCalls: ledger.discoveryAttempts,
     coverageCalls: ledger.coverageAttempts,
     rows: state.counters.rows,
@@ -727,6 +757,7 @@ function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary)
     reportedCredits: ledger.reportedCreditsUsed,
     retainedCredits: ledger.retainedCredits,
     discoveryPages: state.discoveryPages,
+    coveragePages: state.coveragePages,
   });
 }
 
@@ -880,6 +911,24 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
       if (cached) {
         const parsed = parseProviderPage(cached.response, planned, cached.requestId, cached.retrievalTimeMs);
         if (parsed.status !== "valid") throw new Error(`cached-page-${parsed.reason}`);
+        if (planned.purpose === "coverage") {
+          const validation = validateCoveragePage(
+            parsed.page,
+            planned,
+            cached.reportedCreditCost,
+            cached.latencyMs,
+          );
+          state = appendCoveragePageEvidence(state, validation.evidence);
+          writePrivateJsonAtomic(options.paths.state, state, options.durabilityHooks);
+          if (validation.status === "rejected") {
+            writePrivateJsonAtomic(
+              options.paths.aggregateReport,
+              aggregateReport(state, ledger.summarize()),
+              options.durabilityHooks,
+            );
+            throw new Error(`Acquisition stopped after cached coverage-page rejection: ${validation.reason}`);
+          }
+        }
         state = updateAfterPage(
           state,
           item,
@@ -937,6 +986,7 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
         let outcome: Exclude<AttemptOutcome, "pending"> = "request-error";
         let parsedPage: ProviderPage | null = null;
         let latencyMs = 0;
+        let coverageValidation: ReturnType<typeof validateCoveragePage> | null = null;
 
         try {
           response = await options.fetchImpl(NANSEN_DEX_TRADES_ENDPOINT, {
@@ -976,10 +1026,33 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
           latencyMs = Math.max(0, monotonicNow() - attemptStartedAt);
         }
 
-        ledger.settle(reservation, { httpStatus: response?.status ?? null, reportedCreditCost, reportedCreditsUsed, outcome });
+        if (parsedPage && planned.purpose === "coverage") {
+          coverageValidation = validateCoveragePage(parsedPage, planned, reportedCreditCost, latencyMs);
+          if (coverageValidation.status === "rejected") outcome = "invalid-response";
+        }
+
+        ledger.settle(reservation, {
+          httpStatus: response?.status ?? null,
+          reportedCreditCost,
+          reportedCreditsUsed,
+          outcome,
+          failureReason: coverageValidation?.status === "rejected" ? coverageValidation.reason : null,
+        });
+        if (coverageValidation) {
+          state = appendCoveragePageEvidence(state, coverageValidation.evidence);
+          writePrivateJsonAtomic(options.paths.state, state, options.durabilityHooks);
+          if (coverageValidation.status === "rejected") {
+            writePrivateJsonAtomic(
+              options.paths.aggregateReport,
+              aggregateReport(state, ledger.summarize()),
+              options.durabilityHooks,
+            );
+            throw new Error(`Acquisition stopped after coverage-page rejection: ${coverageValidation.reason}`);
+          }
+        }
         if (outcome === "success" && parsedPage) {
           const cachedPage: CachedPage = {
-            cacheVersion: 2,
+            cacheVersion: 3,
             fingerprint,
             retrievalTimeMs: parsedPage.retrievalTimeMs,
             requestId: reservation.attemptId,
@@ -1021,7 +1094,7 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
     const finalLedger = ledger.summarize();
     const report = aggregateReport(state, finalLedger);
     writePrivateJsonAtomic(options.paths.candidateManifest, {
-      manifestVersion: 2,
+      manifestVersion: 3,
       adapterVersion: ACQUISITION_ADAPTER_VERSION,
       rulesVersion: "4",
       candidates: state.results,

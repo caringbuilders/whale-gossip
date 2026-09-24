@@ -16,9 +16,9 @@ import { NANSEN_DEX_TRADES_ENDPOINT, PROBE_TOKEN_ADDRESS } from "./nansen-contra
 
 export { NANSEN_DEX_TRADES_ENDPOINT };
 
-export const ACQUISITION_ADAPTER_VERSION = "2";
-export const ACQUISITION_STATE_VERSION = 2;
-export const ACQUISITION_SCHEMA_VERSION = 2;
+export const ACQUISITION_ADAPTER_VERSION = "3";
+export const ACQUISITION_STATE_VERSION = 3;
+export const ACQUISITION_SCHEMA_VERSION = 3;
 export const ACQUISITION_PER_PAGE = 100;
 export const ACQUISITION_MAX_ATTEMPTS = 130;
 export const ACQUISITION_MAX_RETAINED_CREDITS = 130;
@@ -134,7 +134,7 @@ export interface PrivateCandidateRecord {
 }
 
 export interface SanitizedAcquisitionReport {
-  readonly reportVersion: 2;
+  readonly reportVersion: 3;
   readonly discoveryCalls: number;
   readonly coverageCalls: number;
   readonly rows: number;
@@ -146,6 +146,7 @@ export interface SanitizedAcquisitionReport {
   readonly reportedCredits: number;
   readonly retainedCredits: number;
   readonly discoveryPages: readonly DiscoveryPageEvidence[];
+  readonly coveragePages: readonly CoveragePageEvidence[];
 }
 
 export type DiscoveryValidationReason =
@@ -185,6 +186,29 @@ export interface DiscoveryPageResult {
   readonly evidence: DiscoveryPageEvidence;
   readonly candidates: readonly DiscoveredCandidate[];
 }
+
+export type CoveragePageRejectionReason = "invalid-coverage-row" | "wallet-filter-not-applied";
+
+export interface CoveragePageEvidence {
+  readonly rowCount: number;
+  readonly walletMatchCount: number;
+  readonly tokenMatchCount: number;
+  readonly structurallyValidRowCount: number;
+  readonly structurallyInvalidRowCount: number;
+  readonly rejectionReason: CoveragePageRejectionReason | null;
+  readonly timeSpanBand: DiscoveryTimeSpanBand;
+  readonly pagination: { readonly page: number; readonly perPage: number; readonly isLastPage: boolean };
+  readonly reportedCreditCost: number | null;
+  readonly latencyBand: LatencyBand;
+}
+
+export type CoveragePageValidation =
+  | { readonly status: "accepted"; readonly evidence: CoveragePageEvidence }
+  | {
+      readonly status: "rejected";
+      readonly reason: CoveragePageRejectionReason;
+      readonly evidence: CoveragePageEvidence;
+    };
 
 const DISCOVERY_VALIDATION_REASONS: readonly DiscoveryValidationReason[] = [
   "action-invalid",
@@ -392,7 +416,7 @@ interface NormalizedRow {
   readonly conflictKey: string;
 }
 
-function normalizeRow(row: Record<string, unknown>, expectedToken: string): NormalizedRow | string {
+function normalizeRow(row: Record<string, unknown>, expectedToken: string | null): NormalizedRow | string {
   const occurredAtMs = normalizeTimestamp(row.block_timestamp);
   if (occurredAtMs === null) return "timestamp-precision-or-value-invalid";
   const transactionHash = normalizeHash(row.transaction_hash);
@@ -400,7 +424,7 @@ function normalizeRow(row: Record<string, unknown>, expectedToken: string): Norm
   const wallet = normalizeAddress(row.trader_address);
   if (wallet === null) return "wallet-address-invalid";
   const token = normalizeAddress(row.token_address);
-  if (token === null || token !== expectedToken) return "token-address-mismatch";
+  if (token === null || (expectedToken !== null && token !== expectedToken)) return "token-address-mismatch";
   const action = row.action === "BUY" ? "buy" : row.action === "SELL" ? "sell" : null;
   if (action === null) return "action-invalid";
   if (!isValidUsd(row.estimated_value_usd)) return "usd-value-invalid";
@@ -607,6 +631,56 @@ export function summarizeDiscoveryPage(
   };
 }
 
+export function validateCoveragePage(
+  page: ProviderPage,
+  planned: Omit<PlannedRequest, "request">,
+  reportedCreditCost: number | null,
+  latencyMs: number,
+): CoveragePageValidation {
+  if (planned.purpose !== "coverage" || planned.wallet === null || planned.candidateId === null) {
+    throw new Error("Coverage-page validation requires candidate-specific coverage work");
+  }
+  if (!Number.isFinite(latencyMs) || latencyMs < 0) throw new Error("Coverage latency is invalid");
+
+  let walletMatchCount = 0;
+  let tokenMatchCount = 0;
+  let structurallyInvalidRowCount = 0;
+  const timestamps: number[] = [];
+  for (const row of page.rows) {
+    const normalized = normalizeRow(row, null);
+    if (typeof normalized === "string") {
+      structurallyInvalidRowCount += 1;
+      continue;
+    }
+    timestamps.push(normalized.event.occurredAtMs);
+    if (normalized.event.wallet === planned.wallet) walletMatchCount += 1;
+    if (normalized.event.token === planned.token.address) tokenMatchCount += 1;
+  }
+
+  const structurallyValidRowCount = page.rows.length - structurallyInvalidRowCount;
+  const rejectionReason: CoveragePageRejectionReason | null =
+    structurallyInvalidRowCount > 0
+      ? "invalid-coverage-row"
+      : walletMatchCount !== structurallyValidRowCount || tokenMatchCount !== structurallyValidRowCount
+        ? "wallet-filter-not-applied"
+        : null;
+  const evidence: CoveragePageEvidence = {
+    rowCount: page.rows.length,
+    walletMatchCount,
+    tokenMatchCount,
+    structurallyValidRowCount,
+    structurallyInvalidRowCount,
+    rejectionReason,
+    timeSpanBand: timeSpanBand(timestamps),
+    pagination: { page: page.page, perPage: page.perPage, isLastPage: page.isLastPage },
+    reportedCreditCost,
+    latencyBand: latencyBand(latencyMs),
+  };
+  return rejectionReason === null
+    ? { status: "accepted", evidence }
+    : { status: "rejected", reason: rejectionReason, evidence };
+}
+
 export function compileCoveredCandidate(
   candidate: DiscoveredCandidate,
   normalized: NormalizationResult,
@@ -688,7 +762,7 @@ export function compileCoveredCandidate(
 
 export function buildSanitizedAcquisitionReport(input: SanitizedAcquisitionReport): SanitizedAcquisitionReport {
   return {
-    reportVersion: 2,
+    reportVersion: 3,
     discoveryCalls: input.discoveryCalls,
     coverageCalls: input.coverageCalls,
     rows: input.rows,
@@ -719,6 +793,25 @@ export function buildSanitizedAcquisitionReport(input: SanitizedAcquisitionRepor
       ),
       qualifyingRows: page.qualifyingRows,
       distinctCandidateFingerprints: page.distinctCandidateFingerprints,
+      timeSpanBand: page.timeSpanBand,
+      pagination: {
+        page: page.pagination.page,
+        perPage: page.pagination.perPage,
+        isLastPage: page.pagination.isLastPage,
+      },
+      reportedCreditCost: page.reportedCreditCost,
+      latencyBand: page.latencyBand,
+    })),
+    coveragePages: input.coveragePages.map((page) => ({
+      rowCount: page.rowCount,
+      walletMatchCount: page.walletMatchCount,
+      tokenMatchCount: page.tokenMatchCount,
+      structurallyValidRowCount: page.structurallyValidRowCount,
+      structurallyInvalidRowCount: page.structurallyInvalidRowCount,
+      rejectionReason:
+        page.rejectionReason === "invalid-coverage-row" || page.rejectionReason === "wallet-filter-not-applied"
+          ? page.rejectionReason
+          : null,
       timeSpanBand: page.timeSpanBand,
       pagination: {
         page: page.pagination.page,
