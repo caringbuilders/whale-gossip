@@ -8,7 +8,7 @@ The workflow permits only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. It
 
 The reviewed token universe currently contains only canonical Ethereum WETH9 at `0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2`. No other address has comparable repository evidence, so expansion to three–five non-stable tokens remains pending.
 
-Candidate coverage provisionally adds `filters.trader_address`. The value comes only from a syntactically validated and normalized discovery row; it is never CLI or browser input. Discovery requests omit this filter. Each candidate coverage request includes both the fixed token and its candidate wallet. No tracked project source independently confirms the request field, and it has not been sent by this workflow, so provider acceptance, enforcement, selectivity, pagination, and completeness semantics remain unverified.
+Candidate coverage adds `filters.trader_address`. The value comes only from a syntactically validated and normalized discovery row; it is never CLI or browser input. Discovery requests omit this filter. Each candidate coverage request includes both the fixed token and its candidate wallet. Supplied aggregate evidence says the filter was consistently enforced across 91 coverage pages for one candidate. Page 91 remained nonterminal, so terminal pagination, complete-window cost, and completeness remain unresolved.
 
 ## Bounded discovery sampling
 
@@ -53,9 +53,9 @@ The candidate manifest is private and contains identities and exact evidence. Ag
 
 The closed contract-spike ledger is never opened or modified. Combined-success status starts from the documented constant of three successful spike calls. The acquisition ledger hard-caps new upstream attempts and retained/reported credits at 130. Each request reserves one credit before fetch. Pending attempts and missing usage information retain the reservation. Missing, malformed, or unexpected pricing stops the run. Authentication, authorization, plan, payment, and credit errors stop immediately. HTTP 429 and the bounded transient set may retry once when `Retry-After` is acceptable; every retry uses another durable reservation. Requests are spaced by at least 500 ms.
 
-Until a larger batch is separately reviewed, one live invocation accepts only a digits-only `--max-new-calls` value from 1 through 10. Decimal, exponential, signed, whitespace-padded, zero-padded, zero, and values above ten are rejected. The global 130 limits remain ceilings, but one current run cannot reach them. The internal target is 120 successful calls: three closed spike successes plus at most 117 useful acquisition successes. The updated Academy wording says **100+ calls**, while the older campaign page says **1,000**; eligibility remains unresolved. Calls are never made merely to reach a number.
+One reviewed live invocation accepts only a digits-only `--max-new-calls` value from 1 through 10. Decimal, exponential, signed, whitespace-padded, zero-padded, zero, and values above ten are rejected. The workflow is now frozen after 97 acquisition successes, for exactly 100 combined with the three closed spike successes. The updated Academy wording says **100+ calls**, while the older campaign page says **1,000**; organizer reconciliation remains unresolved. No further discovery or coverage call is authorized, and calls are never made merely to increase a count.
 
-The manually observed dashboard balance after the spike was **1,092 credits**. It is historical user-observed evidence, not a balance inferred or queried by this workflow.
+The historical post-spike dashboard balance was **1,092 credits** and the supplied final balance was **995 credits**. Their 97-credit difference matches the 97 reported acquisition credits. A transient earlier **1,095** reading remains unexplained and is not treated as evidence of extra usage or replenishment.
 
 An exclusive canonical acquisition lock covers a live run. A crash-left lock, a pending/unknown attempt, a successful attempt missing its cache, malformed private state, or cached row-validation failure stops automatic continuation. Settled persistent provider failures also stop the current run; a later invocation will refuse to repeat the same uncertain request without reviewed recovery evidence.
 
@@ -83,18 +83,20 @@ npm run nansen:acquire -- --reprocess-cache
 
 It reads no credential and makes no network request. It takes the canonical acquisition lock, verifies exactly six known version 3 discovery caches against deterministic state and settled ledger attempts, preserves them, and writes separate durable version 4 derivatives with private provenance. A completed result is idempotent; partial or unexpected version 4 output requires manual review and is never overwritten or replayed automatically.
 
-Any future live continuation requires independent review and new explicit authorization. The live command shape remains:
+The historical live command shape was:
 
 ```bash
 npm run nansen:acquire -- --live --max-new-calls 10 --target-total-success 120
 ```
 
-Do not run that command from this milestone. Credential presence, the six-call pilot, cached candidate discovery, or a planned coverage item does not authorize it. Before any later authorization, review canonical private-path metadata, the absence or disposition of any lock/pending attempt, remaining allowances, the version 4 correction, and the private candidate evidence. Do not run it from another clone or worktree.
+Do not run that command: acquisition is frozen at exactly 100 combined successes. Credential presence and incomplete cached coverage do not authorize continuation. A possible single call for the required recorded live-data demonstration must use a new reviewed and explicitly authorized workflow; it must not resume the incomplete coverage sequence automatically. Do not run live acquisition from another clone or worktree.
 
 ## Evidence and unresolved provider questions
 
 The canonical offline reprocessing ran once after synthetic tests. Its allowlisted report recorded six cache pages and 600 rows: 600 valid, zero invalid, 600 whole-second, zero exact-millisecond, one qualifying row, one distinct candidate, zero categorical rejections, and one planned coverage work item. It recorded zero network attempts, zero new ledger attempts, zero new successes, and zero new credits. Keyless status remained six attempts, six successes, six reported credits, six retained credits, zero coverage attempts, and nine combined successes. The command parsed protected cache/state internally but emitted no raw rows, identities, hashes, labels, exact timestamps, exact values, candidate IDs, or request bodies. It did not read the canonical credential or alter the ledger or version 3 evidence.
 
-The version 4 derivatives are cached discovery evidence, not complete candidate coverage or a verified historical round. The single planned coverage item has not been requested. `filters.trader_address` remains live-unverified, and no further live call is authorized.
+After reprocessing, the separately authorized acquisition continued to the supplied final aggregate totals: 97 acquisition attempts and successes, comprising six discovery and 91 candidate-specific coverage calls, with 97 reported and retained credits, no unknown charges, and no failures. Together with the three contract-spike successes, combined successes equal exactly 100.
 
-Still unresolved: live acceptance of `filters.trader_address`; direction semantics; stable row and leg identity; multi-leg representation; corrections across retrievals; USD semantics; inclusive date-boundary behavior; terminal pagination and cross-page stability; discovery density and candidate yield; full-window cost; and whether reviewed real rounds may be redistributed. No real candidate is accepted, exported, or published until private pilot evidence is reviewed against these assumptions.
+The supplied evidence says `filters.trader_address` was consistently enforced across all 91 coverage pages. Page 91 remained nonterminal. Complete coverage was not obtained, no real round compiled or became publishable, and the public game remains synthetic. Acquisition is frozen and no further discovery or coverage request is authorized.
+
+Still unresolved: whether `filters.trader_address` behaves consistently beyond the supplied candidate; direction semantics; stable row and leg identity; multi-leg representation; corrections across retrievals; USD semantics; inclusive date-boundary behavior; terminal pagination and cross-page stability; discovery density and candidate yield; full-window cost; and whether reviewed real rounds may be redistributed. No real candidate is accepted, exported, or published until complete private evidence is reviewed against these assumptions.
