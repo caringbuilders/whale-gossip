@@ -11,10 +11,11 @@ import {
   buildAcquisitionRequest,
   buildCoveragePlan,
   buildDiscoveryPlan,
+  buildSanitizedAcquisitionReport,
   compileCoveredCandidate,
-  discoverCandidates,
   normalizeCompletePages,
   parseProviderPage,
+  summarizeDiscoveryPage,
   type DiscoveredCandidate,
   type PlannedRequest,
   type ProviderPage,
@@ -104,7 +105,10 @@ test("discovery windows are deterministic, non-overlapping, normalized Ethereum 
     assert.equal(plan.request.pagination.per_page, 100);
     assert.equal(Date.parse(plan.request.date.from), plan.localFromMs - PROVIDER_BOUNDARY_OVERLAP_MS);
     assert.equal(Date.parse(plan.request.date.to), plan.localToMsExclusive);
-    if (index > 0) assert.equal(first[index - 1].localToMsExclusive, plan.localFromMs);
+    assert.equal(plan.localToMsExclusive - plan.localFromMs, 6 * 60 * 60 * 1_000);
+    assert.equal(plan.candidateId, null);
+    assert.equal(plan.request.filters, undefined);
+    if (index > 0) assert.ok(first[index - 1].localToMsExclusive < plan.localFromMs);
   }
 });
 
@@ -115,6 +119,8 @@ test("requests reject arbitrary tokens, invalid intervals, and invalid pages", (
   );
   assert.throws(() => buildAcquisitionRequest(TOKEN, 2, 2), /interval/);
   assert.throws(() => buildAcquisitionRequest(TOKEN, 1, 2, 0), /page/);
+  assert.throws(() => buildAcquisitionRequest(TOKEN, 1, 2, 1, "0x1234"), /wallet filter/);
+  assert.deepEqual(coveragePlan().request.filters, { trader_address: WALLET });
 });
 
 test("provider envelopes require exact page and per-page metadata", () => {
@@ -215,12 +221,16 @@ test("addresses and hashes normalize while derived IDs remain deterministic", ()
   assert.match(first.events[0].eventId, /^derived-v1:[0-9a-f]{64}$/);
 });
 
-test("exact canonical rows deduplicate while conflicting identities reject", () => {
+test("exact and cross-page candidate duplicates reject instead of collapsing", () => {
   const exact = row();
   const duplicate = normalizeCompletePages([parsedPage(1, [exact, { ...exact }], true)], coveragePlan());
-  assert.equal(duplicate.status, "complete");
-  assert.equal(duplicate.events.length, 1);
-  assert.equal(duplicate.exactDuplicateRows, 1);
+  assert.deepEqual(duplicate, { status: "rejected", reason: "duplicate-or-unstable-pagination-row" });
+
+  const crossPage = normalizeCompletePages(
+    [parsedPage(1, [exact], false), parsedPage(2, [{ ...exact }], true)],
+    coveragePlan(),
+  );
+  assert.deepEqual(crossPage, { status: "rejected", reason: "duplicate-or-unstable-pagination-row" });
 
   const conflict = normalizeCompletePages(
     [parsedPage(1, [exact, { ...exact, estimated_value_usd: 25_001 }], true)],
@@ -232,7 +242,7 @@ test("exact canonical rows deduplicate while conflicting identities reject", () 
 test("discovery creates deterministic candidates only from qualifying observed trades", () => {
   const retrieval = Date.parse("2026-09-24T12:00:00.000Z");
   const plan = buildDiscoveryPlan(retrieval)[2];
-  const eventTime = plan.localFromMs + DAY;
+  const eventTime = plan.localFromMs + 60 * 60 * 1_000;
   const pagePlan = { ...plan, request: buildAcquisitionRequest(TOKEN, plan.localFromMs, plan.localToMsExclusive, 1) };
   const parsed = parseProviderPage(
     {
@@ -252,12 +262,46 @@ test("discovery creates deterministic candidates only from qualifying observed t
     retrieval,
   );
   assert.equal(parsed.status, "valid");
-  const normalized = normalizeCompletePages([parsed.page], plan);
-  assert.equal(normalized.status, "complete");
-  const candidates = discoverCandidates(normalized, plan);
+  const discovery = summarizeDiscoveryPage(parsed.page, plan, 1, 800);
+  const candidates = discovery.candidates;
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].wallet, WALLET);
   assert.equal(candidates[0].proposedCutoffMs, Math.floor(eventTime / DAY) * DAY + DAY);
+  assert.deepEqual(discovery.evidence, {
+    rowCount: 2,
+    validRowCount: 2,
+    invalidRowCount: 0,
+    validationRejections: {},
+    qualifyingRows: 1,
+    distinctCandidateFingerprints: 1,
+    timeSpanBand: "under-1-hour",
+    pagination: { page: 1, perPage: 100, isLastPage: true },
+    reportedCreditCost: 1,
+    latencyBand: "250-ms-to-1-second",
+  });
+});
+
+test("discovery evidence counts invalid and duplicate rows without exposing identities", () => {
+  const retrieval = Date.parse("2026-09-24T12:00:00.000Z");
+  const plan = buildDiscoveryPlan(retrieval)[0];
+  const valid = row({ block_timestamp: new Date(plan.localFromMs + 1_000).toISOString() });
+  const parsed = parseProviderPage(
+    {
+      data: [valid, { ...valid }, row({ trader_address: "invalid" })],
+      pagination: { page: 1, per_page: 100, is_last_page: false },
+    },
+    plan,
+    "sample-1",
+    retrieval,
+  );
+  assert.equal(parsed.status, "valid");
+  const result = summarizeDiscoveryPage(parsed.page, plan, 1, 100);
+  assert.equal(result.evidence.rowCount, 3);
+  assert.equal(result.evidence.validRowCount, 1);
+  assert.equal(result.evidence.invalidRowCount, 2);
+  assert.deepEqual(result.evidence.validationRejections, { "duplicate-row": 1, "wallet-address-invalid": 1 });
+  const serialized = JSON.stringify(result.evidence);
+  assert.doesNotMatch(serialized, /0x|PRIVATE|25000|2026-/i);
 });
 
 function completeCandidateRows(answerRows: readonly Record<string, unknown>[] = []): Record<string, unknown>[] {
@@ -292,6 +336,30 @@ test("complete evidence compiles only through rules version 4", () => {
   assert.equal(result.compilerResult?.rulesVersion, "4");
   assert.equal(result.compilerResult?.status === "scorable" && result.compilerResult.answer.action, "buy");
   assert.equal(result.coverage?.lookback.fromMs, CUTOFF - LOOKBACK_MS);
+  assert.equal(result.coverage?.answerWindow.toMsExclusive, CUTOFF + ANSWER_WINDOW_MS);
+});
+
+test("coverage evidence comes from actual requested bounds and rules reject one-millisecond shrinkage", () => {
+  const base = normalizeCompletePages([parsedPage(1, completeCandidateRows(), true)], coveragePlan());
+  assert.equal(base.status, "complete");
+  const shortLookback = compileCoveredCandidate(candidate(), {
+    ...base,
+    requestedFromMs: CUTOFF - LOOKBACK_MS + 1,
+  });
+  assert.equal(shortLookback.compilerResult?.status, "unscorable");
+  assert.equal(
+    shortLookback.compilerResult?.status === "unscorable" && shortLookback.compilerResult.reason.code,
+    "coverage-incomplete",
+  );
+  const shortAnswer = compileCoveredCandidate(candidate(), {
+    ...base,
+    requestedToMsExclusive: CUTOFF + ANSWER_WINDOW_MS - 1,
+  });
+  assert.equal(shortAnswer.compilerResult?.status, "unscorable");
+  assert.equal(
+    shortAnswer.compilerResult?.status === "unscorable" && shortAnswer.compilerResult.reason.code,
+    "coverage-incomplete",
+  );
 });
 
 test("incomplete evidence cannot produce Buy, Sell, or No trade", () => {
@@ -319,9 +387,72 @@ test("same-transaction legs are rejected before provider semantics can affect ru
   assert.equal(result.rejectionReason, "ambiguous-provider-transaction-legs");
 });
 
-test("request fingerprints include page and schema deterministically", () => {
+test("Claude's duplicated two-by-$1,300 transaction cannot become No trade", () => {
+  const duplicateLeg = row({
+    block_timestamp: new Date(CUTOFF).toISOString(),
+    transaction_hash: hash(30),
+    estimated_value_usd: 1_300,
+  });
+  const normalized = normalizeCompletePages(
+    [parsedPage(1, [...completeCandidateRows(), duplicateLeg, { ...duplicateLeg }], true)],
+    coveragePlan(),
+  );
+  assert.deepEqual(normalized, { status: "rejected", reason: "duplicate-or-unstable-pagination-row" });
+  const result = compileCoveredCandidate(candidate(), normalized);
+  assert.equal(result.compilerResult, null);
+});
+
+test("request fingerprints include version, purpose, page, and candidate wallet filter", () => {
   const first = buildAcquisitionRequest(TOKEN, CUTOFF, CUTOFF + DAY, 1);
   const second = buildAcquisitionRequest(TOKEN, CUTOFF, CUTOFF + DAY, 2);
-  assert.equal(acquisitionRequestFingerprint(first), acquisitionRequestFingerprint({ ...first }));
-  assert.notEqual(acquisitionRequestFingerprint(first), acquisitionRequestFingerprint(second));
+  const walletRequest = buildAcquisitionRequest(TOKEN, CUTOFF, CUTOFF + DAY, 1, WALLET);
+  const otherWalletRequest = buildAcquisitionRequest(TOKEN, CUTOFF, CUTOFF + DAY, 1, OTHER_WALLET);
+  assert.equal(acquisitionRequestFingerprint(first, "discovery"), acquisitionRequestFingerprint({ ...first }, "discovery"));
+  assert.notEqual(acquisitionRequestFingerprint(first, "discovery"), acquisitionRequestFingerprint(second, "discovery"));
+  assert.notEqual(acquisitionRequestFingerprint(first, "discovery"), acquisitionRequestFingerprint(first, "coverage"));
+  assert.notEqual(
+    acquisitionRequestFingerprint(walletRequest, "coverage"),
+    acquisitionRequestFingerprint(otherWalletRequest, "coverage"),
+  );
+  assert.match(acquisitionRequestFingerprint(first, "discovery"), /^[0-9a-f]{64}$/);
+});
+
+test("sanitized report allowlist drops injected private fields", () => {
+  const report = buildSanitizedAcquisitionReport({
+    reportVersion: 2,
+    discoveryCalls: 1,
+    coverageCalls: 2,
+    rows: 3,
+    candidates: 1,
+    rejectionReasons: { duplicate: 1, [WALLET]: 1, PRIVATE: 1 },
+    scorable: { buy: 1, sell: 0, noTrade: 0 },
+    attempts: 3,
+    successes: 3,
+    reportedCredits: 3,
+    retainedCredits: 3,
+    discoveryPages: [
+      {
+        rowCount: 3,
+        validRowCount: 2,
+        invalidRowCount: 1,
+        validationRejections: { "wallet-address-invalid": 1, [WALLET]: 1 },
+        qualifyingRows: 1,
+        distinctCandidateFingerprints: 1,
+        timeSpanBand: "under-1-hour",
+        pagination: { page: 1, perPage: 100, isLastPage: false },
+        reportedCreditCost: 1,
+        latencyBand: "under-250-ms",
+        wallet: WALLET,
+      } as never,
+    ],
+    wallet: WALLET,
+    hash: hash(90),
+    label: "PRIVATE",
+    exactValue: 25_000,
+    exactTimestamp: "2026-01-01T00:00:00.000Z",
+  } as never);
+  const serialized = JSON.stringify(report);
+  for (const forbidden of [WALLET, hash(90), "PRIVATE", "25000", "2026-"]) {
+    assert.doesNotMatch(serialized, new RegExp(forbidden, "i"));
+  }
 });

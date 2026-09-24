@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { lstatSync, renameSync, unlinkSync } from "node:fs";
+import { closeSync, constants, fsyncSync, lstatSync, openSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { spawnSync } from "node:child_process";
@@ -14,7 +14,10 @@ import {
   ACQUISITION_MAX_ATTEMPTS,
   ACQUISITION_MAX_RETAINED_CREDITS,
   ACQUISITION_SCHEMA_VERSION,
+  ACQUISITION_STATE_VERSION,
   ACQUISITION_TOKEN_UNIVERSE,
+  DISCOVERY_MAX_CALLS,
+  DISCOVERY_MAX_PAGES_PER_WINDOW,
   CONTRACT_SPIKE_SUCCESSES,
   INTERNAL_TOTAL_SUCCESS_TARGET,
   MAX_ACQUISITION_SUCCESSES,
@@ -23,12 +26,14 @@ import {
   buildAcquisitionRequest,
   buildCoveragePlan,
   buildDiscoveryPlan,
+  buildSanitizedAcquisitionReport,
   compileCoveredCandidate,
-  discoverCandidates,
   normalizeCompletePages,
   parseProviderPage,
+  summarizeDiscoveryPage,
   type AcquisitionToken,
   type DiscoveredCandidate,
+  type DiscoveryPageEvidence,
   type PlannedRequest,
   type PrivateCandidateRecord,
   type ProviderPage,
@@ -73,7 +78,7 @@ export function resolveAcquisitionPaths(repositoryRoot = ACQUISITION_REPOSITORY_
     lock: `${ledger}.lock`,
     state: join(privateRoot, "state.json"),
     rawDirectory: join(privateRoot, "raw"),
-    cacheDirectory: join(privateRoot, "cache-v1"),
+    cacheDirectory: join(privateRoot, "cache-v2"),
     candidateManifest: join(privateRoot, "candidate-manifest.json"),
     aggregateReport: join(privateRoot, "aggregate-report.json"),
   };
@@ -93,15 +98,17 @@ export function parseAcquisitionArguments(arguments_: readonly string[]): Acquis
     arguments_[1] === "--max-new-calls" &&
     arguments_[3] === "--target-total-success"
   ) {
-    const maxNewCalls = Number(arguments_[2]);
-    const targetTotalSuccess = Number(arguments_[4]);
-    if (!Number.isSafeInteger(maxNewCalls) || maxNewCalls < 1 || maxNewCalls > ACQUISITION_MAX_ATTEMPTS) {
-      throw new Error("--max-new-calls must be an integer from 1 through 130");
+    if (!/^(?:[1-9]|10)$/.test(arguments_[2])) {
+      throw new Error("--max-new-calls must be a digits-only integer from 1 through 10");
     }
-    if (targetTotalSuccess !== INTERNAL_TOTAL_SUCCESS_TARGET) {
+    if (arguments_[4] !== String(INTERNAL_TOTAL_SUCCESS_TARGET)) {
       throw new Error("--target-total-success must equal the reviewed target of 120");
     }
-    return { mode: "live", maxNewCalls, targetTotalSuccess: INTERNAL_TOTAL_SUCCESS_TARGET };
+    return {
+      mode: "live",
+      maxNewCalls: Number(arguments_[2]),
+      targetTotalSuccess: INTERNAL_TOTAL_SUCCESS_TARGET,
+    };
   }
   throw new Error(
     "Unsupported arguments; use no arguments, --status, or --live --max-new-calls N --target-total-success 120",
@@ -141,6 +148,8 @@ interface AcquisitionLedgerFile {
 
 export interface AcquisitionLedgerSummary {
   readonly attempts: number;
+  readonly discoveryAttempts: number;
+  readonly coverageAttempts: number;
   readonly settled: number;
   readonly successful: number;
   readonly reportedCreditsUsed: number;
@@ -176,13 +185,36 @@ function assertSafeExistingPrivateFile(path: string): void {
   if ((stat.mode & 0o077) !== 0) throw new Error("Private acquisition file permissions are too broad");
 }
 
-function writePrivateJsonAtomic(path: string, value: unknown): void {
+export interface AcquisitionDurabilityHooks {
+  readonly syncDirectory?: (path: string) => void;
+}
+
+function syncDirectoryDurably(path: string): void {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch {
+    throw new Error("Unable to open a private acquisition directory for durable sync");
+  }
+  try {
+    fsyncSync(descriptor);
+  } catch (error) {
+    if (!(isRecord(error) && (error.code === "EINVAL" || error.code === "ENOTSUP"))) {
+      throw new Error("Unable to durably sync a private acquisition directory");
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function writePrivateJsonAtomic(path: string, value: unknown, hooks: AcquisitionDurabilityHooks = {}): void {
   ensurePrivateDirectory(dirname(path));
   if (pathExistsWithoutFollowing(path)) assertSafeExistingPrivateFile(path);
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   try {
     writePrivateTextFileExclusive(temporary, `${JSON.stringify(value, null, 2)}\n`);
     renameSync(temporary, path);
+    (hooks.syncDirectory ?? syncDirectoryDurably)(dirname(path));
   } catch (error) {
     try {
       if (pathExistsWithoutFollowing(temporary)) unlinkSync(temporary);
@@ -281,6 +313,8 @@ export function summarizeAcquisitionLedger(path: string): AcquisitionLedgerSumma
   const successful = settled.filter((attempt) => attempt.outcome === "success").length;
   return {
     attempts: latest.length,
+    discoveryAttempts: latest.filter((attempt) => attempt.purpose === "discovery").length,
+    coverageAttempts: latest.filter((attempt) => attempt.purpose === "coverage").length,
     settled: settled.length,
     successful,
     reportedCreditsUsed: settled.reduce((sum, attempt) => sum + (attempt.reportedCreditsUsed ?? 0), 0),
@@ -295,6 +329,7 @@ export class AcquisitionLedger {
     private readonly path: string,
     private readonly now: () => Date = () => new Date(),
     private readonly createId: () => string = randomUUID,
+    private readonly durabilityHooks: AcquisitionDurabilityHooks = {},
   ) {}
 
   summarize(): AcquisitionLedgerSummary {
@@ -324,7 +359,7 @@ export class AcquisitionLedger {
     const reservation: AcquisitionAttempt = {
       attemptId,
       phase: "reserved",
-      requestFingerprint: acquisitionRequestFingerprint(planned.request),
+      requestFingerprint: acquisitionRequestFingerprint(planned.request, planned.purpose),
       purpose: planned.purpose,
       page: planned.request.pagination.page,
       reservedCredits: 1,
@@ -335,7 +370,7 @@ export class AcquisitionLedger {
       reportedCreditsUsed: null,
       outcome: "pending",
     };
-    writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, reservation] });
+    writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, reservation] }, this.durabilityHooks);
     return reservation;
   }
 
@@ -361,7 +396,7 @@ export class AcquisitionLedger {
       reportedCreditsUsed: result.reportedCreditsUsed,
       outcome: result.outcome,
     };
-    writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, settlement] });
+    writePrivateJsonAtomic(this.path, { ...ledger, attempts: [...ledger.attempts, settlement] }, this.durabilityHooks);
     return settlement;
   }
 }
@@ -375,6 +410,7 @@ interface PageReference {
 interface WorkItem {
   readonly workId: string;
   readonly purpose: "discovery" | "coverage";
+  readonly candidateId: string | null;
   readonly token: AcquisitionToken;
   readonly wallet: string | null;
   readonly cutoffMs: number | null;
@@ -383,10 +419,11 @@ interface WorkItem {
   readonly nextPage: number;
   readonly completedPages: readonly PageReference[];
   readonly complete: boolean;
+  readonly samplingStatus: "pending" | "sampled" | null;
 }
 
 interface WorkflowState {
-  readonly stateVersion: 1;
+  readonly stateVersion: typeof ACQUISITION_STATE_VERSION;
   readonly adapterVersion: typeof ACQUISITION_ADAPTER_VERSION;
   readonly schemaVersion: typeof ACQUISITION_SCHEMA_VERSION;
   readonly initializedAtMs: number;
@@ -394,32 +431,46 @@ interface WorkflowState {
   readonly candidates: readonly DiscoveredCandidate[];
   readonly results: readonly PrivateCandidateRecord[];
   readonly counters: { readonly discoveryCalls: number; readonly coverageCalls: number; readonly rows: number };
+  readonly discoveryPages: readonly DiscoveryPageEvidence[];
 }
 
 interface CachedPage {
-  readonly cacheVersion: 1;
+  readonly cacheVersion: 2;
   readonly fingerprint: string;
   readonly retrievalTimeMs: number;
   readonly requestId: string;
+  readonly reportedCreditCost: number | null;
+  readonly latencyMs: number;
   readonly response: unknown;
 }
 
 function planFromWork(item: WorkItem): PlannedRequest {
   return {
     purpose: item.purpose,
+    candidateId: item.candidateId,
     token: item.token,
     wallet: item.wallet,
     cutoffMs: item.cutoffMs,
     localFromMs: item.localFromMs,
     localToMsExclusive: item.localToMsExclusive,
-    request: buildAcquisitionRequest(item.token, item.localFromMs, item.localToMsExclusive, item.nextPage),
+    request: buildAcquisitionRequest(
+      item.token,
+      item.localFromMs,
+      item.localToMsExclusive,
+      item.nextPage,
+      item.wallet,
+    ),
   };
 }
 
 function workFromPlan(plan: PlannedRequest): WorkItem {
   return {
-    workId: `${plan.purpose}-${acquisitionRequestFingerprint(plan.request).slice(0, 24)}`,
+    workId:
+      plan.purpose === "coverage" && plan.candidateId
+        ? `coverage-${plan.candidateId}`
+        : `discovery-${acquisitionRequestFingerprint(plan.request, "discovery").slice(0, 24)}`,
     purpose: plan.purpose,
+    candidateId: plan.candidateId,
     token: plan.token,
     wallet: plan.wallet,
     cutoffMs: plan.cutoffMs,
@@ -428,12 +479,13 @@ function workFromPlan(plan: PlannedRequest): WorkItem {
     nextPage: 1,
     completedPages: [],
     complete: false,
+    samplingStatus: plan.purpose === "discovery" ? "pending" : null,
   };
 }
 
 function createWorkflowState(nowMs: number): WorkflowState {
   return {
-    stateVersion: 1,
+    stateVersion: ACQUISITION_STATE_VERSION,
     adapterVersion: ACQUISITION_ADAPTER_VERSION,
     schemaVersion: ACQUISITION_SCHEMA_VERSION,
     initializedAtMs: nowMs,
@@ -441,21 +493,68 @@ function createWorkflowState(nowMs: number): WorkflowState {
     candidates: [],
     results: [],
     counters: { discoveryCalls: 0, coverageCalls: 0, rows: 0 },
+    discoveryPages: [],
   };
+}
+
+function isPageReference(value: unknown): value is PageReference {
+  return (
+    isRecord(value) &&
+    typeof value.page === "number" &&
+    Number.isSafeInteger(value.page) &&
+    value.page >= 1 &&
+    typeof value.fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(value.fingerprint) &&
+    typeof value.requestId === "string"
+  );
+}
+
+function isWorkItem(value: unknown): value is WorkItem {
+  return (
+    isRecord(value) &&
+    typeof value.workId === "string" &&
+    (value.purpose === "discovery" || value.purpose === "coverage") &&
+    (value.candidateId === null || typeof value.candidateId === "string") &&
+    isRecord(value.token) &&
+    typeof value.token.symbol === "string" &&
+    typeof value.token.address === "string" &&
+    typeof value.token.verification === "string" &&
+    (value.wallet === null || typeof value.wallet === "string") &&
+    (value.cutoffMs === null || (typeof value.cutoffMs === "number" && Number.isSafeInteger(value.cutoffMs))) &&
+    typeof value.localFromMs === "number" &&
+    Number.isSafeInteger(value.localFromMs) &&
+    typeof value.localToMsExclusive === "number" &&
+    Number.isSafeInteger(value.localToMsExclusive) &&
+    typeof value.nextPage === "number" &&
+    Number.isSafeInteger(value.nextPage) &&
+    value.nextPage >= 1 &&
+    Array.isArray(value.completedPages) &&
+    value.completedPages.every(isPageReference) &&
+    typeof value.complete === "boolean" &&
+    (value.samplingStatus === null || value.samplingStatus === "pending" || value.samplingStatus === "sampled")
+  );
 }
 
 function validateState(value: unknown): value is WorkflowState {
   return (
     isRecord(value) &&
-    value.stateVersion === 1 &&
+    value.stateVersion === ACQUISITION_STATE_VERSION &&
     value.adapterVersion === ACQUISITION_ADAPTER_VERSION &&
     value.schemaVersion === ACQUISITION_SCHEMA_VERSION &&
     typeof value.initializedAtMs === "number" &&
     Number.isSafeInteger(value.initializedAtMs) &&
     Array.isArray(value.work) &&
+    value.work.every(isWorkItem) &&
     Array.isArray(value.candidates) &&
     Array.isArray(value.results) &&
-    isRecord(value.counters)
+    isRecord(value.counters) &&
+    typeof value.counters.discoveryCalls === "number" &&
+    Number.isSafeInteger(value.counters.discoveryCalls) &&
+    typeof value.counters.coverageCalls === "number" &&
+    Number.isSafeInteger(value.counters.coverageCalls) &&
+    typeof value.counters.rows === "number" &&
+    Number.isSafeInteger(value.counters.rows) &&
+    Array.isArray(value.discoveryPages)
   );
 }
 
@@ -475,11 +574,20 @@ function readCachedPage(paths: AcquisitionPaths, fingerprint: string): CachedPag
   if (value === null) return null;
   if (
     !isRecord(value) ||
-    value.cacheVersion !== 1 ||
+    value.cacheVersion !== 2 ||
     value.fingerprint !== fingerprint ||
     typeof value.retrievalTimeMs !== "number" ||
     !Number.isSafeInteger(value.retrievalTimeMs) ||
     typeof value.requestId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.requestId) ||
+    (value.reportedCreditCost !== null &&
+      (typeof value.reportedCreditCost !== "number" ||
+        !Number.isFinite(value.reportedCreditCost) ||
+        value.reportedCreditCost < 0 ||
+        Object.is(value.reportedCreditCost, -0))) ||
+    typeof value.latencyMs !== "number" ||
+    !Number.isFinite(value.latencyMs) ||
+    value.latencyMs < 0 ||
     !("response" in value)
   ) {
     throw new Error("Acquisition cache is malformed or mismatched");
@@ -493,10 +601,16 @@ function loadCompletedPages(paths: AcquisitionPaths, item: WorkItem): ProviderPa
     if (!cached || cached.requestId !== reference.requestId) throw new Error("Acquisition cache page is missing");
     const pagePlan: PlannedRequest = {
       ...planFromWork({ ...item, nextPage: reference.page }),
-      request: buildAcquisitionRequest(item.token, item.localFromMs, item.localToMsExclusive, reference.page),
+      request: buildAcquisitionRequest(
+        item.token,
+        item.localFromMs,
+        item.localToMsExclusive,
+        reference.page,
+        item.wallet,
+      ),
     };
     const parsed = parseProviderPage(cached.response, pagePlan, cached.requestId, cached.retrievalTimeMs);
-    if (parsed.status !== "valid") throw new Error("Cached acquisition page no longer validates");
+    if (parsed.status !== "valid") throw new Error(`cached-page-${parsed.reason}`);
     return parsed.page;
   });
 }
@@ -507,44 +621,46 @@ function updateAfterPage(
   page: ProviderPage,
   paths: AcquisitionPaths,
   wasUpstreamCall: boolean,
+  reportedCreditCost: number | null,
+  latencyMs: number,
 ): WorkflowState {
   const reference = { page: page.page, fingerprint: page.requestFingerprint, requestId: page.requestId };
   const updatedItem: WorkItem = {
     ...item,
     nextPage: page.page + 1,
     completedPages: [...item.completedPages, reference],
-    complete: page.isLastPage,
+    complete:
+      item.purpose === "discovery"
+        ? page.isLastPage || page.page >= DISCOVERY_MAX_PAGES_PER_WINDOW
+        : page.isLastPage,
+    samplingStatus: item.purpose === "discovery" ? "sampled" : null,
   };
   const candidates = [...state.candidates];
   let results = [...state.results];
   const work = state.work.map((candidate) => (candidate.workId === item.workId ? updatedItem : candidate));
   let rowsAdded = 0;
+  const discoveryPages = [...state.discoveryPages];
 
-  if (page.isLastPage) {
+  if (item.purpose === "discovery") {
+    const discovery = summarizeDiscoveryPage(page, updatedItem, reportedCreditCost, latencyMs);
+    rowsAdded = discovery.evidence.rowCount;
+    discoveryPages.push(discovery.evidence);
+    const existing = new Set(candidates.map((candidate) => candidate.candidateId));
+    for (const candidate of discovery.candidates) {
+      if (existing.has(candidate.candidateId)) continue;
+      existing.add(candidate.candidateId);
+      candidates.push(candidate);
+      work.push(workFromPlan(buildCoveragePlan(candidate)));
+    }
+    candidates.sort((left, right) => left.candidateId.localeCompare(right.candidateId));
+  } else if (page.isLastPage) {
     const pages = loadCompletedPages(paths, updatedItem);
     const normalized = normalizeCompletePages(pages, updatedItem);
     if (normalized.status === "complete") rowsAdded = normalized.rowCount;
-    if (item.purpose === "discovery") {
-      if (normalized.status !== "complete") throw new Error(`Discovery coverage rejected: ${normalized.reason}`);
-      const found = discoverCandidates(normalized, updatedItem);
-      const existing = new Set(candidates.map((candidate) => candidate.candidateId));
-      for (const candidate of found) {
-        if (existing.has(candidate.candidateId)) continue;
-        existing.add(candidate.candidateId);
-        candidates.push(candidate);
-        work.push(workFromPlan(buildCoveragePlan(candidate)));
-      }
-      candidates.sort((left, right) => left.candidateId.localeCompare(right.candidateId));
-    } else {
-      const candidate = candidates.find((value) => value.candidateId === item.workId.replace(/^coverage-/, ""));
-      const fallback = candidates.find(
-        (value) => value.wallet === item.wallet && value.proposedCutoffMs === item.cutoffMs && value.token.address === item.token.address,
-      );
-      const selected = candidate ?? fallback;
-      if (!selected) throw new Error("Coverage work has no private candidate");
-      results = [...results.filter((result) => result.candidateId !== selected.candidateId), compileCoveredCandidate(selected, normalized)];
-      results.sort((left, right) => left.candidateId.localeCompare(right.candidateId));
-    }
+    const selected = candidates.find((value) => value.candidateId === item.candidateId);
+    if (!selected) throw new Error("Coverage work has no private candidate");
+    results = [...results.filter((result) => result.candidateId !== selected.candidateId), compileCoveredCandidate(selected, normalized)];
+    results.sort((left, right) => left.candidateId.localeCompare(right.candidateId));
   }
 
   return {
@@ -557,7 +673,32 @@ function updateAfterPage(
       coverageCalls: state.counters.coverageCalls + (wasUpstreamCall && item.purpose === "coverage" ? 1 : 0),
       rows: state.counters.rows + rowsAdded,
     },
+    discoveryPages,
   };
+}
+
+function selectNextWork(state: WorkflowState): WorkItem | undefined {
+  const pending = state.work.filter((work) => !work.complete);
+  const discoveryCallAvailable = state.counters.discoveryCalls < DISCOVERY_MAX_CALLS;
+  const unsampledDiscovery = discoveryCallAvailable
+    ? pending.find((work) => work.purpose === "discovery" && work.completedPages.length === 0)
+    : undefined;
+  if (unsampledDiscovery) return unsampledDiscovery;
+  const coverage = pending
+    .filter((work) => work.purpose === "coverage")
+    .sort(
+      (left, right) =>
+        left.completedPages.length - right.completedPages.length || left.workId.localeCompare(right.workId),
+    )[0];
+  if (coverage) return coverage;
+  return discoveryCallAvailable
+    ? pending
+        .filter((work) => work.purpose === "discovery")
+        .sort(
+          (left, right) =>
+            left.completedPages.length - right.completedPages.length || left.workId.localeCompare(right.workId),
+      )[0]
+    : undefined;
 }
 
 function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary): SanitizedAcquisitionReport {
@@ -573,10 +714,10 @@ function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary)
       rejectionReasons[reason] = (rejectionReasons[reason] ?? 0) + 1;
     }
   }
-  return {
-    reportVersion: 1,
-    discoveryCalls: state.counters.discoveryCalls,
-    coverageCalls: state.counters.coverageCalls,
+  return buildSanitizedAcquisitionReport({
+    reportVersion: 2,
+    discoveryCalls: ledger.discoveryAttempts,
+    coverageCalls: ledger.coverageAttempts,
     rows: state.counters.rows,
     candidates: state.candidates.length,
     rejectionReasons,
@@ -585,7 +726,8 @@ function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary)
     successes: ledger.successful,
     reportedCredits: ledger.reportedCreditsUsed,
     retainedCredits: ledger.retainedCredits,
-  };
+    discoveryPages: state.discoveryPages,
+  });
 }
 
 export function assertAcquisitionPrivatePathsIgnored(paths: AcquisitionPaths): void {
@@ -636,6 +778,7 @@ export interface AcquisitionRunOptions {
   readonly monotonicNow?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly createAttemptId?: () => string;
+  readonly durabilityHooks?: AcquisitionDurabilityHooks;
 }
 
 function classifyStatus(status: number): Exclude<AttemptOutcome, "pending" | "success" | "unexpected-pricing"> {
@@ -657,7 +800,12 @@ function retryDelay(response: Response): number | null {
 }
 
 async function withAcquisitionLock<T>(paths: AcquisitionPaths, now: () => Date, operation: () => Promise<T>): Promise<T> {
-  const lock = acquireContractSpikeLock(paths.lock, now);
+  let lock: ReturnType<typeof acquireContractSpikeLock>;
+  try {
+    lock = acquireContractSpikeLock(paths.lock, now);
+  } catch {
+    throw new Error("Acquisition lock is already held or unsafe; live mode remains disabled");
+  }
   let operationError: unknown;
   try {
     return await operation();
@@ -667,7 +815,8 @@ async function withAcquisitionLock<T>(paths: AcquisitionPaths, now: () => Date, 
   } finally {
     try {
       lock.release();
-    } catch (releaseError) {
+    } catch {
+      const releaseError = new Error("Acquisition lock could not be released safely");
       if (operationError !== undefined) {
         throw new AggregateError([operationError, releaseError], "Acquisition failed and its lock could not be released safely");
       }
@@ -687,7 +836,7 @@ export interface AcquisitionRunResult {
 
 export async function runLiveAcquisition(options: AcquisitionRunOptions): Promise<AcquisitionRunResult> {
   if (!/^[\x21-\x7e]+$/.test(options.apiKey)) throw new Error("NANSEN_API_KEY is malformed; no request was attempted");
-  if (!Number.isSafeInteger(options.maxNewCalls) || options.maxNewCalls < 1 || options.maxNewCalls > ACQUISITION_MAX_ATTEMPTS) {
+  if (!Number.isSafeInteger(options.maxNewCalls) || options.maxNewCalls < 1 || options.maxNewCalls > 10) {
     throw new Error("Per-run call limit is invalid");
   }
   if (options.targetTotalSuccess !== INTERNAL_TOTAL_SUCCESS_TARGET) {
@@ -699,7 +848,12 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
   const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds)));
 
   return withAcquisitionLock(options.paths, now, async () => {
-    const ledger = new AcquisitionLedger(options.paths.ledger, now, options.createAttemptId);
+    const ledger = new AcquisitionLedger(
+      options.paths.ledger,
+      now,
+      options.createAttemptId,
+      options.durabilityHooks,
+    );
     const opening = ledger.summarize();
     const remainingAttempts = ACQUISITION_MAX_ATTEMPTS - opening.attempts;
     const remainingCredits = ACQUISITION_MAX_RETAINED_CREDITS - opening.retainedCredits;
@@ -707,7 +861,7 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
       throw new Error("Per-run limit exceeds the remaining global attempt or retained-credit allowance");
     }
     let state = readState(options.paths, now().getTime());
-    writePrivateJsonAtomic(options.paths.state, state);
+    writePrivateJsonAtomic(options.paths.state, state, options.durabilityHooks);
     let networkAttempts = 0;
     let cacheHits = 0;
     let lastAttemptStarted: number | null = null;
@@ -718,16 +872,24 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
         stoppedBecause = "target-reached";
         break;
       }
-      const item = state.work.find((work) => !work.complete);
+      const item = selectNextWork(state);
       if (!item) break;
       const planned = planFromWork(item);
-      const fingerprint = acquisitionRequestFingerprint(planned.request);
+      const fingerprint = acquisitionRequestFingerprint(planned.request, planned.purpose);
       const cached = readCachedPage(options.paths, fingerprint);
       if (cached) {
         const parsed = parseProviderPage(cached.response, planned, cached.requestId, cached.retrievalTimeMs);
-        if (parsed.status !== "valid") throw new Error("Cached provider page is invalid");
-        state = updateAfterPage(state, item, parsed.page, options.paths, false);
-        writePrivateJsonAtomic(options.paths.state, state);
+        if (parsed.status !== "valid") throw new Error(`cached-page-${parsed.reason}`);
+        state = updateAfterPage(
+          state,
+          item,
+          parsed.page,
+          options.paths,
+          false,
+          cached.reportedCreditCost,
+          cached.latencyMs,
+        );
+        writePrivateJsonAtomic(options.paths.state, state, options.durabilityHooks);
         cacheHits += 1;
         continue;
       }
@@ -743,6 +905,9 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
         stoppedBecause = "per-run-limit";
         break;
       }
+      if (planned.purpose === "discovery" && ledger.summarize().discoveryAttempts >= DISCOVERY_MAX_CALLS) {
+        break;
+      }
 
       let retryCount = 0;
       while (true) {
@@ -754,19 +919,24 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
         if (current.attempts >= ACQUISITION_MAX_ATTEMPTS || current.retainedCredits >= ACQUISITION_MAX_RETAINED_CREDITS) {
           throw new Error("Global acquisition allowance is exhausted");
         }
+        if (planned.purpose === "discovery" && current.discoveryAttempts >= DISCOVERY_MAX_CALLS) {
+          throw new Error("Acquisition stopped at the discovery sampling call cap");
+        }
         if (lastAttemptStarted !== null) {
           const wait = ACQUISITION_MIN_REQUEST_INTERVAL_MS - (monotonicNow() - lastAttemptStarted);
           if (wait > 0) await sleep(wait);
         }
         const reservation = ledger.reserve(planned);
         networkAttempts += 1;
-        lastAttemptStarted = monotonicNow();
+        const attemptStartedAt = monotonicNow();
+        lastAttemptStarted = attemptStartedAt;
         let response: Response | null = null;
         let rawBody = "";
         let reportedCreditCost: number | null = null;
         let reportedCreditsUsed: number | null = null;
         let outcome: Exclude<AttemptOutcome, "pending"> = "request-error";
         let parsedPage: ProviderPage | null = null;
+        let latencyMs = 0;
 
         try {
           response = await options.fetchImpl(NANSEN_DEX_TRADES_ENDPOINT, {
@@ -802,20 +972,32 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
           writePrivateTextFileExclusive(join(options.paths.rawDirectory, `${reservation.attemptId}.json`), rawBody);
         } catch {
           outcome = "request-error";
+        } finally {
+          latencyMs = Math.max(0, monotonicNow() - attemptStartedAt);
         }
 
         ledger.settle(reservation, { httpStatus: response?.status ?? null, reportedCreditCost, reportedCreditsUsed, outcome });
         if (outcome === "success" && parsedPage) {
           const cachedPage: CachedPage = {
-            cacheVersion: 1,
+            cacheVersion: 2,
             fingerprint,
             retrievalTimeMs: parsedPage.retrievalTimeMs,
             requestId: reservation.attemptId,
+            reportedCreditCost,
+            latencyMs,
             response: JSON.parse(rawBody) as unknown,
           };
-          writePrivateJsonAtomic(cachePath(options.paths, fingerprint), cachedPage);
-          state = updateAfterPage(state, item, parsedPage, options.paths, true);
-          writePrivateJsonAtomic(options.paths.state, state);
+          writePrivateJsonAtomic(cachePath(options.paths, fingerprint), cachedPage, options.durabilityHooks);
+          state = updateAfterPage(
+            state,
+            item,
+            parsedPage,
+            options.paths,
+            true,
+            reportedCreditCost,
+            latencyMs,
+          );
+          writePrivateJsonAtomic(options.paths.state, state, options.durabilityHooks);
           break;
         }
         if (outcome === "authentication-error" || outcome === "authorization-or-credit-error") {
@@ -839,12 +1021,12 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
     const finalLedger = ledger.summarize();
     const report = aggregateReport(state, finalLedger);
     writePrivateJsonAtomic(options.paths.candidateManifest, {
-      manifestVersion: 1,
+      manifestVersion: 2,
       adapterVersion: ACQUISITION_ADAPTER_VERSION,
       rulesVersion: "4",
       candidates: state.results,
-    });
-    writePrivateJsonAtomic(options.paths.aggregateReport, report);
+    }, options.durabilityHooks);
+    writePrivateJsonAtomic(options.paths.aggregateReport, report, options.durabilityHooks);
     return { mode: "live", networkAttempts, cacheHits, ledger: finalLedger, report, stoppedBecause };
   });
 }
@@ -875,6 +1057,7 @@ export interface AcquisitionCommandOptions {
   readonly monotonicNow?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly createAttemptId?: () => string;
+  readonly durabilityHooks?: AcquisitionDurabilityHooks;
 }
 
 export async function runAcquisitionCommand(
@@ -914,5 +1097,6 @@ export async function runAcquisitionCommand(
     monotonicNow: options.monotonicNow,
     sleep: options.sleep,
     createAttemptId: options.createAttemptId,
+    durabilityHooks: options.durabilityHooks,
   });
 }

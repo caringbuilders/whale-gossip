@@ -1,63 +1,63 @@
 # Nansen acquisition design and runbook
 
-This document describes the reviewed boundary for acquiring private real-round candidates. The implementation is present but has **not** been executed live. Normal development, tests, dry-run, status, compilation, and the public application remain network-free.
+This document describes the corrected boundary for acquiring private real-round candidates. The first design was rejected in review before it made any provider calls. Adapter/state/schema version 2 is implemented and tested only with synthetic responses and temporary private roots. Normal development, tests, dry-run, status, compilation, and the public application remain network-free.
 
 ## Fixed provider boundary
 
-The workflow permits only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. It validates the exact HTTPS protocol, host, path, lack of query/fragment/credentials, request method, and server-owned body. Every request uses `chain: "ethereum"`, `only_smart_money: false`, ascending `block_timestamp`, and the fixed page size. Redirect following is disabled and every request has an abort timeout.
+The workflow permits only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`. It validates the exact HTTPS protocol, host, path, lack of query/fragment/credentials, request method, and server-owned body. Every request uses `chain: "ethereum"`, `only_smart_money: false`, ascending `block_timestamp`, and page size 100. Redirect following is disabled and every request has an abort timeout.
 
-The reviewed token universe currently contains only canonical Ethereum WETH9 at `0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2`. That address was already reviewed for the closed contract spike and is recorded in `lib/server/nansen-contract.ts`. WETH is an ERC-20 wrapper rather than native ETH and is not a stablecoin. No other address in the repository has comparable verification evidence, so expanding to three–five non-stable tokens remains pending instead of guessing contracts.
+The reviewed token universe currently contains only canonical Ethereum WETH9 at `0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2`. No other address has comparable repository evidence, so expansion to three–five non-stable tokens remains pending.
 
-The repository has not validated a wallet-filter request field for this endpoint. Coverage therefore remains token-centric and filters the discovered wallet locally after retrieving the complete token interval. This is conservative but may have low candidate yield or require too many pages. Adding a server-owned wallet filter requires separate contract evidence and review.
+The endpoint schema identified in the supplied review permits candidate coverage to add `filters.trader_address`. The value comes only from a syntactically validated and normalized discovery row; it is never CLI or browser input. Discovery requests omit this filter. Each candidate coverage request includes both the fixed token and its candidate wallet. This request shape is repository-reviewed but has not been sent to Nansen, so its live behavior, selectivity, pagination, and completeness semantics remain unverified.
 
-## Deterministic acquisition strategy
+## Bounded discovery sampling
 
-On the first live run, the workflow freezes a UTC-day anchor in ignored private state. For each reviewed token, discovery covers three adjacent non-overlapping ten-day windows spanning 40 to 10 days before that day. Pages are requested in ascending order and cached under a schema-versioned normalized request fingerprint. A cache hit makes no provider call and is excluded from call-success reporting.
+On first live initialization, the workflow freezes a UTC-day retrieval anchor in ignored private state. WETH discovery samples three deterministic, non-overlapping six-hour periods beginning approximately 36, 26, and 16 days before retrieval. Qualifying rows propose next-day UTC cutoffs approximately 35, 25, and 15 days before retrieval, within the proposal's 10–40-day eligibility range.
 
-Discovery accepts only runtime-valid Ethereum rows and selects observed trades at or above `$25,000`. It proposes `t0` at the next UTC-day boundary after the qualifying event and keeps only cutoffs 10–40 days before the frozen retrieval day. Discovery pages are candidate evidence only. They are never reused as complete scoring coverage and never compile directly into a round.
+Discovery is sampling only. Each window is capped at two pages, so a fresh workflow can spend no more than six discovery calls. The scheduler samples page 1 across every window before doing other work. If valid candidates appear, it prioritizes their candidate-specific coverage before optional second discovery pages. It never continues a discovery item beyond page 2, never labels a capped window complete, and stops below the run allowance when no useful work remains. Every valid discovery page is processed immediately; a terminal page is not required to nominate candidates.
 
-Each candidate gets a separate coverage work item for `[t0 - 30 days, t0 + 48 hours)`. Because the provider date filters are documented as inclusive, the request overlaps the local start by one millisecond and includes the local exclusive end. Normalization then reapplies the required half-open inequalities locally. Pages must arrive exactly once in sequence from page 1 through a validated `is_last_page=true`; missing, duplicate, out-of-order, prematurely terminal, nonterminal, malformed, timed-out, or request-mismatched evidence cannot become complete coverage. Events are sorted locally rather than trusting cross-page order.
+Discovery duplicates are counted categorically within a page and cannot create duplicate candidate work. The ignored aggregate report uses a field-by-field allowlist. Per page it records only row and validation counts, categorical rejection reasons, `$25,000+` row count, distinct candidate-fingerprint count, a coarse time-span band, returned pagination metadata, reported credit cost, and a latency band. It excludes addresses, hashes, labels, amounts, exact values, and exact timestamps.
 
-The provider has not yet demonstrated terminal pagination, stable pages during acquisition, or exact boundary behavior. The implementation enforces its adapter contract; a later review must compare that contract with private live evidence before accepting real rounds.
+## Candidate-specific coverage
+
+Each candidate gets an independent work ID of `coverage-${candidateId}`, including candidates that share a cutoff. Its wallet-filtered request covers the actual local interval `[t0 - 30 days, t0 + 48 hours)`. The request overlaps the local start by one millisecond and includes the local exclusive end because provider date filters are documented as inclusive; normalization reapplies the half-open bounds locally.
+
+Pages must arrive exactly once and in sequence from page 1 through validated `is_last_page=true`. Missing, duplicate, cross-page duplicate, out-of-order, prematurely terminal, nonterminal, malformed, timed-out, wallet-mismatched, or request-mismatched evidence rejects coverage. Exact duplicate candidate rows are treated as unstable pagination evidence and reject; they are never collapsed into a scorable result. Conflicting rows also reject. Events are sorted locally rather than trusting cross-page order.
+
+Coverage supplied to rules version 4 is derived from the work item's successfully retrieved local request bounds. A one-millisecond shortfall at either required boundary is unscorable. A provider terminal flag, discovery page, elapsed delay, or event array alone does not establish complete coverage.
 
 ## Conservative normalization and compilation
 
-Every relied-upon row field is checked at runtime. The adapter requires:
+Every relied-upon row field is checked at runtime. The adapter requires exact millisecond ISO UTC timestamps; valid Ethereum trader/token addresses and transaction hashes normalized to lowercase; `BUY` or `SELL`; a finite, nonnegative numeric `estimated_value_usd` that is not signed zero; the requested token; and, for coverage, the requested candidate wallet.
 
-- exact millisecond ISO UTC timestamps that round-trip without precision loss;
-- syntactically valid Ethereum trader/token addresses and transaction hashes, normalized to lowercase;
-- `BUY` or `SELL`, mapped provisionally to token-relative `buy` or `sell`;
-- a finite, nonnegative numeric `estimated_value_usd` that is not signed zero; and
-- the requested token address on every returned row.
+Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 2 continues to derive private `derived-v1:<sha256>` event IDs from the canonical full provider row; the label describes the derivation format, not the adapter version or a provider guarantee. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, aggregate reports, logs, or public output.
 
-Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 1 derives `derived-v1:<sha256>` from the canonical full provider row. This is deterministic local provenance, not a claim that the provider guarantees identity across corrections or retrievals. Exact canonical rows may collapse. Rows with the same transaction, wallet, token, timestamp, and action but different canonical content reject as conflicts. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, reports, logs, or public output.
+Only complete normalized evidence is offered to `compileRound` in `lib/rules.ts`; scoring is not reimplemented in the adapter. Rejected or incomplete normalization has no coverage and cannot produce Buy, Sell, or No trade.
 
-Only complete normalized evidence is offered to `compileRound` in `lib/rules.ts`; scoring is not reimplemented in the adapter. Coverage objects explicitly span the rules-v4 lookback and answer window and use the latest successful page retrieval time as `observedAtMs`. An incomplete or rejected normalization has no coverage and cannot produce Buy, Sell, or No trade.
+## Private state and durability
 
-## Private state and publication boundary
-
-All live artifacts use separate ignored paths:
+All live artifacts use ignored paths:
 
 - ledger and lock: `data/ledgers/nansen-acquisition.json` and `.lock`;
-- resumable state, cache, and raw pages: `data/private/nansen-acquisition/`;
+- resumable state, versioned request cache, and raw pages: `data/private/nansen-acquisition/`;
 - private candidate manifest: `data/private/nansen-acquisition/candidate-manifest.json`;
-- sanitized counts-only report: `data/private/nansen-acquisition/aggregate-report.json`.
+- sanitized aggregate report: `data/private/nansen-acquisition/aggregate-report.json`.
 
-Private directories require mode `0700`; files require `0600`, current-user ownership, regular-file types, and no symlink traversal. The candidate manifest records stable candidate ID, token, private wallet, proposed cutoff, source request IDs/pages, retrieval time, coverage, compiler result or rejection, and rules/adapter versions. Raw rows, exact trades, provider labels, wallets, hashes, answers, and provenance stay ignored and private.
+Private directories require mode `0700`; files require `0600`, current-user ownership, regular-file types, and no symlink traversal. Atomic JSON writes use a restrictive temporary file, rename, and containing-directory `fsync` where supported. A reservation is durably written before fetch; failure to persist or directory-sync it prevents the request. Fingerprints include adapter, state, and schema versions, request purpose, page, date bounds, token, chain, flags, ordering, and candidate wallet filter. Discovery and coverage cannot share a cache identity. Cache hits make zero upstream calls and do not increment attempt, success, discovery-call, or coverage-call counters.
 
-The aggregate report contains counts only: discovery and coverage calls, rows, candidates, rejection counts, scorable action counts, attempts, successes, and credits. It is sanitized but remains in the ignored private workspace by default. The workflow never commits or publishes real fixtures. A later explicit review/publish step must use an allowlist boundary consistent with the existing serializer and omit wallet addresses, hashes, source IDs, exact timestamps, exact values, answers before guessing, and outcome evidence. Relative times and size bands reduce trivial lookup but do not guarantee anonymity.
+The candidate manifest is private and contains identities and exact evidence. The aggregate report is sanitized but remains ignored by default. Acquisition never publishes fixtures. A later explicit review must use the existing public allowlist boundary and leakage tests.
 
-## Budget, accounting, and resumption
+## Budget, failure, and recovery
 
-The closed contract-spike ledger is never opened or modified. Combined-success status starts from the documented constant of three successful spike calls.
+The closed contract-spike ledger is never opened or modified. Combined-success status starts from the documented constant of three successful spike calls. The acquisition ledger hard-caps new upstream attempts and retained/reported credits at 130. Each request reserves one credit before fetch. Pending attempts and missing usage information retain the reservation. Missing, malformed, or unexpected pricing stops the run. Authentication, authorization, plan, payment, and credit errors stop immediately. HTTP 429 and the bounded transient set may retry once when `Retry-After` is acceptable; every retry uses another durable reservation. Requests are spaced by at least 500 ms.
 
-The acquisition ledger has hard limits of 130 new upstream attempts and 130 retained/reported credits. Each request reserves one credit durably before fetch. Pending attempts and missing usage information retain the reservation. A successful response must report exactly one credit cost and one credit used; missing, malformed, or unexpected pricing stops the run. Authentication, authorization, plan, payment, and credit errors stop immediately. HTTP 429 and the bounded transient status set may retry once when `Retry-After` is acceptable; every retry is a new reserved attempt. Requests are spaced by at least 500 ms, approximately two per second. Raw-write failure retains already observed status and credit evidence.
+Until a larger batch is separately reviewed, one live invocation accepts only a digits-only `--max-new-calls` value from 1 through 10. Decimal, exponential, signed, whitespace-padded, zero-padded, zero, and values above ten are rejected. The global 130 limits remain ceilings, but one current run cannot reach them. The internal target is 120 successful calls: three closed spike successes plus at most 117 useful acquisition successes. The updated Academy wording says **100+ calls**, while the older campaign page says **1,000**; eligibility remains unresolved. Calls are never made merely to reach a number.
 
-The internal target is 120 total successful calls: 3 closed spike successes plus at most 117 useful acquisition successes. This supplies a margin over the updated Academy wording of **100+ calls** while avoiding calls made only to inflate usage. The older campaign page still says **1,000**, so eligibility remains unresolved. Cache hits, dry runs, failures, and planned requests do not count as successful qualifying calls.
+The manually observed dashboard balance after the spike was **1,092 credits**. It is historical user-observed evidence, not a balance inferred or queried by this workflow.
 
-The manually observed dashboard balance after the spike was **1,092 credits**. It is historical manual evidence, not a balance inferred by this workflow. The implementation does not query a balance endpoint.
+An exclusive canonical acquisition lock covers a live run. A crash-left lock, a pending/unknown attempt, a successful attempt missing its cache, malformed private state, or cached row-validation failure stops automatic continuation. Settled persistent provider failures also stop the current run; a later invocation will refuse to repeat the same uncertain request without reviewed recovery evidence.
 
-An exclusive canonical lock covers the entire live run. State and request caches make normal stops resumable. A crash-left lock fails closed and requires manual inspection; it is not automatically deleted. Changing the working directory does not relocate canonical state. Separate clones and worktrees cannot coordinate this local ledger and are forbidden for live acquisition.
+Safe recovery is evidence-preserving: stop all acquisition processes; do not delete the lock, ledger, state, cache, or raw response; inspect only approved metadata and keyless sanitized status; reconcile the attempt and reported account usage through an independent review; then create a specific reviewed recovery procedure or tool. Never edit accounting or replay an uncertain request by hand. Separate clones and worktrees cannot coordinate this local ledger and are forbidden for live acquisition.
 
 ## Commands
 
@@ -73,16 +73,16 @@ Keyless status reads only the new acquisition ledger:
 npm run nansen:acquire -- --status
 ```
 
-After independent review and a new explicit authorization, the first bounded pilot command is exactly:
+After independent review and new explicit authorization, the first bounded pilot command is exactly:
 
 ```bash
 npm run nansen:acquire -- --live --max-new-calls 10 --target-total-success 120
 ```
 
-Do not run that live command from another clone/worktree, with a residual lock, or without reviewing the private path metadata and remaining allowance. The per-run limit must fit within both remaining global attempts and retained credits. A later run uses the same explicit flags and a newly authorized bound; credential presence alone is not authorization.
+That command has not been run and is not authorized by credential presence. Before authorization, review canonical private-path metadata, the absence or disposition of any lock/pending attempt, remaining allowances, and the corrected commit. Do not run it from another clone or worktree.
 
 ## Evidence and unresolved provider questions
 
-This implementation milestone used synthetic provider responses and temporary roots only. It made zero Nansen calls, used zero credits, did not read the canonical key, and did not inspect the real spike ledger, raw responses, or acquisition artifacts.
+This correction used synthetic responses and temporary dummy roots only. It made zero Nansen or other external application calls, used zero credits, did not read the canonical credential, and did not inspect real ledgers, acquisition state, caches, locks, manifests, or raw responses.
 
-Provider direction remains observed but provisional. Stable leg identity, multi-leg representation, corrections across retrievals, USD semantics, inclusive boundaries, terminal pagination, cross-page stability, candidate yield, and whether token-centric coverage fits the budget remain unresolved. No real candidate is accepted, exported, or published until private live evidence is reviewed against these assumptions.
+Still unresolved: live acceptance of `filters.trader_address`; direction semantics; stable row and leg identity; multi-leg representation; corrections across retrievals; USD semantics; inclusive date-boundary behavior; terminal pagination and cross-page stability; discovery density and candidate yield; full-window cost; and whether reviewed real rounds may be redistributed. No real candidate is accepted, exported, or published until private pilot evidence is reviewed against these assumptions.

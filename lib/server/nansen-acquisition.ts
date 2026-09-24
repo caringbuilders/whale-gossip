@@ -16,8 +16,9 @@ import { NANSEN_DEX_TRADES_ENDPOINT, PROBE_TOKEN_ADDRESS } from "./nansen-contra
 
 export { NANSEN_DEX_TRADES_ENDPOINT };
 
-export const ACQUISITION_ADAPTER_VERSION = "1";
-export const ACQUISITION_SCHEMA_VERSION = 1;
+export const ACQUISITION_ADAPTER_VERSION = "2";
+export const ACQUISITION_STATE_VERSION = 2;
+export const ACQUISITION_SCHEMA_VERSION = 2;
 export const ACQUISITION_PER_PAGE = 100;
 export const ACQUISITION_MAX_ATTEMPTS = 130;
 export const ACQUISITION_MAX_RETAINED_CREDITS = 130;
@@ -25,7 +26,9 @@ export const ACQUISITION_EXPECTED_CREDIT_COST = 1;
 export const CONTRACT_SPIKE_SUCCESSES = 3;
 export const INTERNAL_TOTAL_SUCCESS_TARGET = 120;
 export const MAX_ACQUISITION_SUCCESSES = 117;
-export const DISCOVERY_WINDOW_MS = 10 * 24 * 60 * 60 * 1_000;
+export const DISCOVERY_WINDOW_MS = 6 * 60 * 60 * 1_000;
+export const DISCOVERY_MAX_PAGES_PER_WINDOW = 2;
+export const DISCOVERY_MAX_CALLS = 6;
 export const PROVIDER_BOUNDARY_OVERLAP_MS = 1;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -51,6 +54,7 @@ export interface AcquisitionRequest {
   readonly chain: "ethereum";
   readonly token_address: string;
   readonly only_smart_money: false;
+  readonly filters?: { readonly trader_address: string };
   readonly date: { readonly from: string; readonly to: string };
   readonly pagination: { readonly page: number; readonly per_page: number };
   readonly order_by: readonly [{ readonly field: "block_timestamp"; readonly direction: "ASC" }];
@@ -58,6 +62,7 @@ export interface AcquisitionRequest {
 
 export interface PlannedRequest {
   readonly purpose: "discovery" | "coverage";
+  readonly candidateId: string | null;
   readonly token: AcquisitionToken;
   readonly wallet: string | null;
   readonly cutoffMs: number | null;
@@ -93,6 +98,8 @@ export type NormalizationResult =
         readonly page: number;
         readonly requestFingerprint: string;
       }[];
+      readonly requestedFromMs: number;
+      readonly requestedToMsExclusive: number;
     }
   | { readonly status: "rejected"; readonly reason: string };
 
@@ -127,7 +134,7 @@ export interface PrivateCandidateRecord {
 }
 
 export interface SanitizedAcquisitionReport {
-  readonly reportVersion: 1;
+  readonly reportVersion: 2;
   readonly discoveryCalls: number;
   readonly coverageCalls: number;
   readonly rows: number;
@@ -138,7 +145,56 @@ export interface SanitizedAcquisitionReport {
   readonly successes: number;
   readonly reportedCredits: number;
   readonly retainedCredits: number;
+  readonly discoveryPages: readonly DiscoveryPageEvidence[];
 }
+
+export type DiscoveryValidationReason =
+  | "action-invalid"
+  | "duplicate-row"
+  | "timestamp-precision-or-value-invalid"
+  | "token-address-mismatch"
+  | "transaction-hash-invalid"
+  | "usd-value-invalid"
+  | "wallet-address-invalid";
+
+export type DiscoveryTimeSpanBand =
+  | "empty"
+  | "under-1-hour"
+  | "1-to-6-hours"
+  | "6-to-24-hours"
+  | "1-to-3-days"
+  | "3-to-10-days"
+  | "over-10-days";
+
+export type LatencyBand = "under-250-ms" | "250-ms-to-1-second" | "1-to-3-seconds" | "over-3-seconds";
+
+export interface DiscoveryPageEvidence {
+  readonly rowCount: number;
+  readonly validRowCount: number;
+  readonly invalidRowCount: number;
+  readonly validationRejections: Readonly<Partial<Record<DiscoveryValidationReason, number>>>;
+  readonly qualifyingRows: number;
+  readonly distinctCandidateFingerprints: number;
+  readonly timeSpanBand: DiscoveryTimeSpanBand;
+  readonly pagination: { readonly page: number; readonly perPage: number; readonly isLastPage: boolean };
+  readonly reportedCreditCost: number | null;
+  readonly latencyBand: LatencyBand;
+}
+
+export interface DiscoveryPageResult {
+  readonly evidence: DiscoveryPageEvidence;
+  readonly candidates: readonly DiscoveredCandidate[];
+}
+
+const DISCOVERY_VALIDATION_REASONS: readonly DiscoveryValidationReason[] = [
+  "action-invalid",
+  "duplicate-row",
+  "timestamp-precision-or-value-invalid",
+  "token-address-mismatch",
+  "transaction-hash-invalid",
+  "usd-value-invalid",
+  "wallet-address-invalid",
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -209,8 +265,19 @@ export function assertAcquisitionEndpoint(endpoint: string): void {
   }
 }
 
-export function acquisitionRequestFingerprint(request: AcquisitionRequest): string {
-  return sha256(`${ACQUISITION_SCHEMA_VERSION}:${canonicalJson(request)}`);
+export function acquisitionRequestFingerprint(
+  request: AcquisitionRequest,
+  purpose: PlannedRequest["purpose"],
+): string {
+  return sha256(
+    canonicalJson({
+      adapterVersion: ACQUISITION_ADAPTER_VERSION,
+      stateVersion: ACQUISITION_STATE_VERSION,
+      schemaVersion: ACQUISITION_SCHEMA_VERSION,
+      purpose,
+      request,
+    }),
+  );
 }
 
 export function buildAcquisitionRequest(
@@ -218,16 +285,21 @@ export function buildAcquisitionRequest(
   localFromMs: number,
   localToMsExclusive: number,
   page = 1,
+  wallet: string | null = null,
 ): AcquisitionRequest {
   assertToken(token);
   if (!isSafeTimestamp(localFromMs) || !isSafeTimestamp(localToMsExclusive) || localFromMs >= localToMsExclusive) {
     throw new Error("Acquisition interval is invalid");
   }
   if (!Number.isSafeInteger(page) || page < 1) throw new Error("Acquisition page is invalid");
+  if (wallet !== null && (normalizeAddress(wallet) !== wallet || !ETHEREUM_ADDRESS.test(wallet))) {
+    throw new Error("Acquisition wallet filter is invalid");
+  }
   return {
     chain: ETHEREUM_CHAIN,
     token_address: token.address,
     only_smart_money: false,
+    ...(wallet === null ? {} : { filters: { trader_address: wallet } }),
     date: {
       from: new Date(localFromMs - PROVIDER_BOUNDARY_OVERLAP_MS).toISOString(),
       to: new Date(localToMsExclusive).toISOString(),
@@ -240,13 +312,13 @@ export function buildAcquisitionRequest(
 export function buildDiscoveryPlan(retrievalTimeMs: number): readonly PlannedRequest[] {
   if (!isSafeTimestamp(retrievalTimeMs)) throw new Error("Retrieval time is invalid");
   const retrievalDayMs = Math.floor(retrievalTimeMs / DAY_MS) * DAY_MS;
-  const earliest = retrievalDayMs - 40 * DAY_MS;
   return ACQUISITION_TOKEN_UNIVERSE.flatMap((token) =>
-    [0, 1, 2].map((index) => {
-      const localFromMs = earliest + index * DISCOVERY_WINDOW_MS;
+    [36, 26, 16].map((daysBefore) => {
+      const localFromMs = retrievalDayMs - daysBefore * DAY_MS;
       const localToMsExclusive = localFromMs + DISCOVERY_WINDOW_MS;
       return {
         purpose: "discovery" as const,
+        candidateId: null,
         token,
         wallet: null,
         cutoffMs: null,
@@ -267,12 +339,13 @@ export function buildCoveragePlan(candidate: DiscoveredCandidate, page = 1): Pla
   const localToMsExclusive = candidate.proposedCutoffMs + ANSWER_WINDOW_MS;
   return {
     purpose: "coverage",
+    candidateId: candidate.candidateId,
     token: candidate.token,
     wallet: candidate.wallet,
     cutoffMs: candidate.proposedCutoffMs,
     localFromMs,
     localToMsExclusive,
-    request: buildAcquisitionRequest(candidate.token, localFromMs, localToMsExclusive, page),
+    request: buildAcquisitionRequest(candidate.token, localFromMs, localToMsExclusive, page, candidate.wallet),
   };
 }
 
@@ -303,7 +376,7 @@ export function parseProviderPage(
     status: "valid",
     page: {
       requestId,
-      requestFingerprint: acquisitionRequestFingerprint(planned.request),
+      requestFingerprint: acquisitionRequestFingerprint(planned.request, planned.purpose),
       retrievalTimeMs,
       page: expectedPage,
       perPage: expectedPerPage,
@@ -354,6 +427,9 @@ export function normalizeCompletePages(
   pages: readonly ProviderPage[],
   planned: Omit<PlannedRequest, "request">,
 ): NormalizationResult {
+  if (planned.purpose !== "coverage" || planned.wallet === null || planned.candidateId === null) {
+    return { status: "rejected", reason: "coverage-plan-invalid" };
+  }
   if (pages.length === 0) return { status: "rejected", reason: "missing-pages" };
   if (new Set(pages.map((page) => page.page)).size !== pages.length) {
     return { status: "rejected", reason: "duplicate-page" };
@@ -362,7 +438,14 @@ export function normalizeCompletePages(
     if (page.page !== index + 1) return { status: "rejected", reason: "missing-or-out-of-order-page" };
     if (page.perPage !== ACQUISITION_PER_PAGE) return { status: "rejected", reason: "per-page-mismatch" };
     const expectedFingerprint = acquisitionRequestFingerprint(
-      buildAcquisitionRequest(planned.token, planned.localFromMs, planned.localToMsExclusive, page.page),
+      buildAcquisitionRequest(
+        planned.token,
+        planned.localFromMs,
+        planned.localToMsExclusive,
+        page.page,
+        planned.wallet,
+      ),
+      "coverage",
     );
     if (page.requestFingerprint !== expectedFingerprint) {
       return { status: "rejected", reason: "request-identity-mismatch" };
@@ -383,6 +466,7 @@ export function normalizeCompletePages(
     for (const row of page.rows) {
       const result = normalizeRow(row, planned.token.address);
       if (typeof result === "string") return { status: "rejected", reason: result };
+      if (result.event.wallet !== planned.wallet) return { status: "rejected", reason: "wallet-filter-mismatch" };
       normalized.push(result);
     }
   }
@@ -392,6 +476,9 @@ export function normalizeCompletePages(
   for (const row of normalized) {
     if (byFingerprint.has(row.fingerprint)) exactDuplicateRows += 1;
     else byFingerprint.set(row.fingerprint, row);
+  }
+  if (exactDuplicateRows > 0) {
+    return { status: "rejected", reason: "duplicate-or-unstable-pagination-row" };
   }
   const uniqueRows = [...byFingerprint.values()];
   const conflicts = new Map<string, Set<string>>();
@@ -422,22 +509,75 @@ export function normalizeCompletePages(
       page: page.page,
       requestFingerprint: page.requestFingerprint,
     })),
+    requestedFromMs: planned.localFromMs,
+    requestedToMsExclusive: planned.localToMsExclusive,
   };
 }
 
-export function discoverCandidates(
-  normalized: Extract<NormalizationResult, { status: "complete" }>,
+function timeSpanBand(timestamps: readonly number[]): DiscoveryTimeSpanBand {
+  if (timestamps.length === 0) return "empty";
+  const span = Math.max(...timestamps) - Math.min(...timestamps);
+  if (span < 60 * 60 * 1_000) return "under-1-hour";
+  if (span < 6 * 60 * 60 * 1_000) return "1-to-6-hours";
+  if (span < DAY_MS) return "6-to-24-hours";
+  if (span < 3 * DAY_MS) return "1-to-3-days";
+  if (span < 10 * DAY_MS) return "3-to-10-days";
+  return "over-10-days";
+}
+
+function latencyBand(latencyMs: number): LatencyBand {
+  if (latencyMs < 250) return "under-250-ms";
+  if (latencyMs < 1_000) return "250-ms-to-1-second";
+  if (latencyMs < 3_000) return "1-to-3-seconds";
+  return "over-3-seconds";
+}
+
+function isDiscoveryReason(value: string): value is DiscoveryValidationReason {
+  return DISCOVERY_VALIDATION_REASONS.includes(value as DiscoveryValidationReason);
+}
+
+export function summarizeDiscoveryPage(
+  page: ProviderPage,
   planned: Omit<PlannedRequest, "request">,
-): readonly DiscoveredCandidate[] {
-  if (planned.purpose !== "discovery") throw new Error("Discovery requires a discovery plan");
-  const retrievalDay = Math.floor(normalized.retrievalTimeMs / DAY_MS) * DAY_MS;
+  reportedCreditCost: number | null,
+  latencyMs: number,
+): DiscoveryPageResult {
+  if (planned.purpose !== "discovery" || planned.wallet !== null || planned.candidateId !== null) {
+    throw new Error("Discovery page requires a discovery sampling plan");
+  }
+  if (!Number.isFinite(latencyMs) || latencyMs < 0) throw new Error("Discovery latency is invalid");
+
+  const validRows: NormalizedRow[] = [];
+  const validationRejections: Partial<Record<DiscoveryValidationReason, number>> = {};
+  for (const row of page.rows) {
+    const normalized = normalizeRow(row, planned.token.address);
+    if (typeof normalized === "string") {
+      const reason: DiscoveryValidationReason = isDiscoveryReason(normalized)
+        ? normalized
+        : "timestamp-precision-or-value-invalid";
+      validationRejections[reason] = (validationRejections[reason] ?? 0) + 1;
+    } else {
+      validRows.push(normalized);
+    }
+  }
+
+  const uniqueRows = new Map<string, NormalizedRow>();
+  for (const row of validRows) {
+    if (uniqueRows.has(row.fingerprint)) {
+      validationRejections["duplicate-row"] = (validationRejections["duplicate-row"] ?? 0) + 1;
+    } else {
+      uniqueRows.set(row.fingerprint, row);
+    }
+  }
+  const retainedRows = [...uniqueRows.values()];
+  const retrievalDay = Math.floor(page.retrievalTimeMs / DAY_MS) * DAY_MS;
   const byId = new Map<string, DiscoveredCandidate>();
-  for (const event of normalized.events) {
+  for (const { event } of retainedRows) {
     if ((event.usdValue as number) < ADMISSION_TRADE_MIN_USD) continue;
     const proposedCutoffMs = Math.floor(event.occurredAtMs / DAY_MS) * DAY_MS + DAY_MS;
     const age = retrievalDay - proposedCutoffMs;
     if (age < 10 * DAY_MS || age > 40 * DAY_MS) continue;
-    const candidateId = `candidate-v1-${sha256(`${planned.token.address}:${event.wallet}:${proposedCutoffMs}`).slice(0, 24)}`;
+    const candidateId = `candidate-v2-${sha256(`${planned.token.address}:${event.wallet}:${proposedCutoffMs}`).slice(0, 24)}`;
     byId.set(candidateId, {
       candidateId,
       token: planned.token,
@@ -446,7 +586,25 @@ export function discoverCandidates(
       anchorEventId: event.eventId,
     });
   }
-  return [...byId.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId));
+  const candidates = [...byId.values()].sort((left, right) => left.candidateId.localeCompare(right.candidateId));
+  const invalidRowCount = Object.values(validationRejections).reduce((sum, count) => sum + (count ?? 0), 0);
+  return {
+    evidence: {
+      rowCount: page.rows.length,
+      validRowCount: retainedRows.length,
+      invalidRowCount,
+      validationRejections: Object.fromEntries(
+        Object.entries(validationRejections).sort(([left], [right]) => left.localeCompare(right)),
+      ),
+      qualifyingRows: retainedRows.filter((row) => (row.event.usdValue as number) >= ADMISSION_TRADE_MIN_USD).length,
+      distinctCandidateFingerprints: candidates.length,
+      timeSpanBand: timeSpanBand(retainedRows.map((row) => row.event.occurredAtMs)),
+      pagination: { page: page.page, perPage: page.perPage, isLastPage: page.isLastPage },
+      reportedCreditCost,
+      latencyBand: latencyBand(latencyMs),
+    },
+    candidates,
+  };
 }
 
 export function compileCoveredCandidate(
@@ -469,12 +627,19 @@ export function compileCoveredCandidate(
   });
   if (normalized.status !== "complete") return rejected(normalized.reason);
 
-  const lookbackStart = candidate.proposedCutoffMs - LOOKBACK_MS;
   const answerEnd = candidate.proposedCutoffMs + ANSWER_WINDOW_MS;
   if (normalized.retrievalTimeMs < answerEnd) return rejected("answer-window-not-yet-observed");
   const coverage = {
-    lookback: { status: "complete" as const, fromMs: lookbackStart, toMsExclusive: candidate.proposedCutoffMs },
-    answerWindow: { status: "complete" as const, fromMs: candidate.proposedCutoffMs, toMsExclusive: answerEnd },
+    lookback: {
+      status: "complete" as const,
+      fromMs: normalized.requestedFromMs,
+      toMsExclusive: candidate.proposedCutoffMs,
+    },
+    answerWindow: {
+      status: "complete" as const,
+      fromMs: candidate.proposedCutoffMs,
+      toMsExclusive: normalized.requestedToMsExclusive,
+    },
   };
   const matchingTransactions = new Map<string, number>();
   for (const event of normalized.events) {
@@ -521,6 +686,47 @@ export function compileCoveredCandidate(
   };
 }
 
-export function sanitizeAggregateReport(input: SanitizedAcquisitionReport): SanitizedAcquisitionReport {
-  return JSON.parse(JSON.stringify(input)) as SanitizedAcquisitionReport;
+export function buildSanitizedAcquisitionReport(input: SanitizedAcquisitionReport): SanitizedAcquisitionReport {
+  return {
+    reportVersion: 2,
+    discoveryCalls: input.discoveryCalls,
+    coverageCalls: input.coverageCalls,
+    rows: input.rows,
+    candidates: input.candidates,
+    rejectionReasons: Object.fromEntries(
+      Object.entries(input.rejectionReasons)
+        .filter(
+          ([reason, count]) =>
+            /^[a-z][a-z0-9-]{0,63}$/.test(reason) && Number.isSafeInteger(count) && count >= 0,
+        )
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([reason, count]) => [reason, count]),
+    ),
+    scorable: { buy: input.scorable.buy, sell: input.scorable.sell, noTrade: input.scorable.noTrade },
+    attempts: input.attempts,
+    successes: input.successes,
+    reportedCredits: input.reportedCredits,
+    retainedCredits: input.retainedCredits,
+    discoveryPages: input.discoveryPages.map((page) => ({
+      rowCount: page.rowCount,
+      validRowCount: page.validRowCount,
+      invalidRowCount: page.invalidRowCount,
+      validationRejections: Object.fromEntries(
+        DISCOVERY_VALIDATION_REASONS.flatMap((reason) => {
+          const count = page.validationRejections[reason];
+          return Number.isSafeInteger(count) && (count ?? -1) >= 0 ? [[reason, count]] : [];
+        }),
+      ),
+      qualifyingRows: page.qualifyingRows,
+      distinctCandidateFingerprints: page.distinctCandidateFingerprints,
+      timeSpanBand: page.timeSpanBand,
+      pagination: {
+        page: page.pagination.page,
+        perPage: page.pagination.perPage,
+        isLastPage: page.pagination.isLastPage,
+      },
+      reportedCreditCost: page.reportedCreditCost,
+      latencyBand: page.latencyBand,
+    })),
+  };
 }
