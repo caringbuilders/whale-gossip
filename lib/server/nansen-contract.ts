@@ -20,8 +20,8 @@ import { dirname, isAbsolute, join, parse, resolve } from "node:path";
  */
 
 export const NANSEN_DEX_TRADES_ENDPOINT = "https://api.nansen.ai/api/v1/tgm/dex-trades";
-export const CONTRACT_SPIKE_MAX_ATTEMPTS = 5;
-export const CONTRACT_SPIKE_MAX_RETAINED_CREDITS = 5;
+export const CONTRACT_SPIKE_MAX_ATTEMPTS = 3;
+export const CONTRACT_SPIKE_MAX_RETAINED_CREDITS = 3;
 export const EXPECTED_CREDITS_PER_ATTEMPT = 1;
 
 // Canonical WETH9 on Ethereum. This fixed probe input is not a candidate round.
@@ -54,13 +54,14 @@ export interface DexTradesRequest {
   ];
 }
 
-export function buildProbeRequest(): DexTradesRequest {
+export function buildProbeRequest(page = PROBE_PAGE): DexTradesRequest {
+  if (!Number.isSafeInteger(page) || page < 1) throw new Error("Probe page is invalid");
   return {
     chain: "ethereum",
     token_address: PROBE_TOKEN_ADDRESS,
     only_smart_money: false,
     date: { from: PROBE_FROM_ISO, to: PROBE_TO_ISO },
-    pagination: { page: PROBE_PAGE, per_page: PROBE_PER_PAGE },
+    pagination: { page, per_page: PROBE_PER_PAGE },
     order_by: [{ field: "block_timestamp", direction: "ASC" }],
   };
 }
@@ -312,6 +313,10 @@ function assertOwnedByCurrentUser(stat: Stats): void {
   }
 }
 
+function isFileSystemError(error: unknown, code: string): boolean {
+  return isRecord(error) && error.code === code;
+}
+
 function assertSafeRegularFile(stat: Stats): void {
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Private contract-spike file is not a regular file");
   assertOwnedByCurrentUser(stat);
@@ -331,7 +336,9 @@ function assertDirectoryChainIsSafe(path: string): void {
   }
 }
 
-export function ensurePrivateDirectory(path: string): void {
+type CreateDirectory = (path: string, options: { mode: number }) => unknown;
+
+export function ensurePrivateDirectory(path: string, createDirectory: CreateDirectory = mkdirSync): void {
   const absolute = resolve(path);
   if (!isAbsolute(absolute)) throw new Error("Private contract-spike path must be absolute");
   const root = parse(absolute).root;
@@ -342,9 +349,11 @@ export function ensurePrivateDirectory(path: string): void {
     let stat = lstatOrNull(current);
     if (stat === null) {
       try {
-        mkdirSync(current, { mode: 0o700 });
-      } catch {
-        throw new Error("Unable to create a private contract-spike directory");
+        createDirectory(current, { mode: 0o700 });
+      } catch (error) {
+        if (!isFileSystemError(error, "EEXIST")) {
+          throw new Error("Unable to create a private contract-spike directory");
+        }
       }
       stat = lstatOrNull(current);
     }
@@ -361,14 +370,36 @@ export function ensurePrivateDirectory(path: string): void {
 
 export function readCredentialTextFile(path: string): string {
   assertDirectoryChainIsSafe(dirname(path));
+  const initialStat = lstatOrNull(path);
+  if (initialStat === null) throw new Error("The canonical credential file is missing");
+  if (!initialStat.isFile() || initialStat.isSymbolicLink()) {
+    throw new Error("The canonical credential path has an unsafe file type");
+  }
+  if (typeof process.getuid === "function" && initialStat.uid !== process.getuid()) {
+    throw new Error("The canonical credential file has unsafe ownership");
+  }
+  if ((initialStat.mode & 0o077) !== 0) {
+    throw new Error("The canonical credential file has unsafe permissions");
+  }
   let descriptor: number;
   try {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    throw new Error("Unable to read the repository credential file safely");
+  } catch (error) {
+    if (isFileSystemError(error, "ENOENT")) throw new Error("The canonical credential file is missing");
+    if (isFileSystemError(error, "ELOOP") || isFileSystemError(error, "EISDIR")) {
+      throw new Error("The canonical credential path has an unsafe file type");
+    }
+    throw new Error("The canonical credential file could not be opened safely");
   }
   try {
-    assertSafeRegularFile(fstatSync(descriptor));
+    const openedStat = fstatSync(descriptor);
+    if (!openedStat.isFile()) throw new Error("The canonical credential path has an unsafe file type");
+    if (typeof process.getuid === "function" && openedStat.uid !== process.getuid()) {
+      throw new Error("The canonical credential file has unsafe ownership");
+    }
+    if ((openedStat.mode & 0o077) !== 0) {
+      throw new Error("The canonical credential file has unsafe permissions");
+    }
     return readFileSync(descriptor, "utf8");
   } finally {
     closeSync(descriptor);
@@ -523,6 +554,20 @@ function latestByAttempt(entries: readonly LedgerEntry[]): Map<string, LedgerEnt
   return latest;
 }
 
+function summarizeLedgerEntries(entries: readonly LedgerEntry[]): LedgerSummary {
+  const reservations = new Set(entries.filter((entry) => entry.phase === "reserved").map((entry) => entry.attemptId));
+  const latest = [...latestByAttempt(entries).values()];
+  const settlements = latest.filter((entry): entry is LedgerSettlement => entry.phase === "settled");
+  return {
+    attempts: reservations.size,
+    settled: settlements.length,
+    successful: settlements.filter((entry) => entry.outcome === "success").length,
+    reportedCreditsUsed: settlements.reduce((sum, entry) => sum + (entry.reportedCreditsUsed ?? 0), 0),
+    unknownChargeAttempts: settlements.filter((entry) => entry.reportedCreditsUsed === null).length,
+    retainedCredits: latest.reduce((sum, entry) => sum + entry.retainedCredits, 0),
+  };
+}
+
 export class ContractSpikeLedger {
   constructor(
     private readonly path: string,
@@ -531,18 +576,38 @@ export class ContractSpikeLedger {
   ) {}
 
   summarize(): LedgerSummary {
+    return summarizeLedgerEntries(readLedger(this.path));
+  }
+
+  assertReadyForPaginationProbe(expectedPageOneFingerprint: string): LedgerSummary {
     const entries = readLedger(this.path);
-    const reservations = new Set(entries.filter((entry) => entry.phase === "reserved").map((entry) => entry.attemptId));
-    const latest = [...latestByAttempt(entries).values()];
-    const settlements = latest.filter((entry): entry is LedgerSettlement => entry.phase === "settled");
-    return {
-      attempts: reservations.size,
-      settled: settlements.length,
-      successful: settlements.filter((entry) => entry.outcome === "success").length,
-      reportedCreditsUsed: settlements.reduce((sum, entry) => sum + (entry.reportedCreditsUsed ?? 0), 0),
-      unknownChargeAttempts: settlements.filter((entry) => entry.reportedCreditsUsed === null).length,
-      retainedCredits: latest.reduce((sum, entry) => sum + entry.retainedCredits, 0),
-    };
+    const summary = summarizeLedgerEntries(entries);
+    if (entries.length !== 2 || summary.attempts !== 1 || summary.settled !== 1 || summary.successful !== 1) {
+      throw new Error("Pagination probe requires exactly one settled successful historical attempt");
+    }
+    const [reservation, settlement] = entries;
+    const safeState =
+      reservation.phase === "reserved" &&
+      settlement.phase === "settled" &&
+      reservation.attemptId === settlement.attemptId &&
+      reservation.requestFingerprint === expectedPageOneFingerprint &&
+      settlement.requestFingerprint === expectedPageOneFingerprint &&
+      reservation.pagination.page === PROBE_PAGE &&
+      settlement.pagination.page === PROBE_PAGE &&
+      reservation.pagination.perPage === PROBE_PER_PAGE &&
+      settlement.pagination.perPage === PROBE_PER_PAGE &&
+      settlement.httpStatus === 200 &&
+      settlement.reportedCreditCost === EXPECTED_CREDITS_PER_ATTEMPT &&
+      settlement.reportedCreditsUsed === EXPECTED_CREDITS_PER_ATTEMPT &&
+      settlement.retainedCredits === EXPECTED_CREDITS_PER_ATTEMPT &&
+      settlement.outcome === "success" &&
+      summary.reportedCreditsUsed === EXPECTED_CREDITS_PER_ATTEMPT &&
+      summary.unknownChargeAttempts === 0 &&
+      summary.retainedCredits === EXPECTED_CREDITS_PER_ATTEMPT;
+    if (!safeState) {
+      throw new Error("Pagination probe ledger does not match the expected safe page-1 state");
+    }
+    return summary;
   }
 
   reserve(fingerprint: string, pagination: { readonly page: number; readonly perPage: number }): LedgerReservation {

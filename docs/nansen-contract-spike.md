@@ -4,17 +4,25 @@ This document records a narrow authenticated probe of `POST /api/v1/tgm/dex-trad
 
 ## Safety envelope
 
-- The command defaults to dry-run. Live access requires `npm run nansen:spike -- --live`.
+- The command defaults to dry-run. The original page-1 mode requires `npm run nansen:spike -- --live`. The separately bounded pagination mode requires the exact pair `--live --pagination-probe`; either flag alone is insufficient.
 - The only allowed URL is `https://api.nansen.ai/api/v1/tgm/dex-trades`.
-- The fixed request uses Ethereum WETH, `only_smart_money=false`, no label filters, a one-hour historical interval, ascending `block_timestamp`, page 1, and three records per page.
+- The fixed request uses Ethereum WETH, `only_smart_money=false`, no label filters, a one-hour historical interval, ascending `block_timestamp`, and three records per page. The original probe uses page 1; pagination mode can use only pages 2 and 3 with every other request field unchanged.
 - All credential, ledger, lock, and raw-response paths are derived from the script module's canonical repository root rather than the current working directory. The key parser reads only `NANSEN_API_KEY` from that repository's `.env.local`; it does not load unrelated values into `process.env`, and a shell variable cannot override the file.
-- The durable ignored JSONL ledger reserves before sending and permits at most five actual attempts and five retained credits. Missing or malformed credit-usage headers retain the one-credit reservation.
+- The durable ignored JSONL ledger reserves before sending and permits at most **three total actual attempts and three retained credits for this milestone**. The one historical page-1 attempt therefore leaves room for no more than two further requests. Missing or malformed credit-usage headers retain the one-credit reservation.
 - Before the first live reservation, the runner exclusively creates `<ledger>.lock` with restrictive permissions and holds its descriptor for the complete run. A competing or crash-left lock fails closed before reservation or fetch. The lock is released only in the normal `finally` path after its descriptor closes.
-- One bounded retry is available only for HTTP 408, 429, 500, 502, 503, or 504. Requests are separated by at least 500 ms, and an excessive or malformed `Retry-After` stops the run.
+- The original page-1 mode has one bounded retry only for HTTP 408, 429, 500, 502, 503, or 504. Requests are separated by at least 500 ms, and an excessive or malformed `Retry-After` stops the run. Pagination mode has no retry for any outcome.
 - Fetch uses `redirect: "error"`, so one reservation invokes fetch once and cannot follow a redirect with the API key or body. HTTP 401, 402, and 403 stop the run. Unexpected pricing, malformed successful envelopes, exhausted caps, unsafe paths, unsafe environment-file tracking, and non-allowlisted URLs also stop.
 - `.env.local`, the raw response, and the ledger are ignored private artifacts. The ledger contains a request fingerprint and accounting metadata, not the API key, authorization header, raw request body, wallet values, or response body.
 
-Normal `npm test`, lint, type checking, application development, and builds do not invoke the live command or send Nansen requests. Runner tests inject in-memory fetch implementations. The correction suite was also executed with `test/offline-network-guard.mjs` preloaded.
+Normal `npm test`, lint, type checking, application development, and builds do not invoke the live command or send Nansen requests. The standard `npm test` script automatically preloads `test/offline-network-guard.mjs`; a sanity test requires dummy fetch and raw-socket calls to be blocked. Runner tests inject in-memory fetch implementations.
+
+## Prepared pagination probe — not executed
+
+Pagination mode acquires the same exclusive lock before inspecting accounting. It refuses to reserve or fetch unless the private ledger contains exactly one reservation and matching settlement for the fixed page-1 request, with HTTP 200, successful outcome, reported cost and use of one credit, no unknown charge, and one retained credit. The original page-1 live mode now requires an empty ledger, so it cannot consume the two continuation slots after the historical success.
+
+From that exact state it requests page 2 once. Any redirect, timeout, 429, 5xx, authentication/plan/credit response, malformed or mismatched pagination, raw-write failure, or pricing mismatch stops after that attempt. A valid page 2 with `is_last_page=true` also stops. Only a valid page 2 with `is_last_page=false` permits one page-3 request, after which the script stops regardless of the page-3 pagination flag. Pages 2 and 3 remain contract evidence only: they never establish complete lookback or answer-window coverage.
+
+This pagination mode has been prepared and offline-tested but **has not been run**. Its implementation commit made zero Nansen or other external calls and consumed zero credits. Live execution remains unauthorized pending review of the prepared code. Any calls beyond the three-attempt milestone belong to a separate future acquisition workflow with its own authorization and controls.
 
 ### Crash-left lock recovery
 
@@ -24,7 +32,7 @@ Locks do not expire and the runner never removes a pre-existing lock automatical
 2. Run `npm run nansen:spike -- --status`. This reads the sanitized ledger accounting summary without loading the key or making a network request. Review attempts, settlements, successes, reported usage, unknown charges, and retained credits locally; do not print or copy the private JSONL file.
 3. Only after confirming there is no runner and reconciling the sanitized accounting, remove `data/ledgers/nansen-contract-spike.jsonl.lock` manually. A malformed or uncertain ledger remains a stop condition even after lock removal.
 
-Each clone or worktree has a separate local ledger and lock. Never bypass a lock or budget by running live acquisition from another clone, worktree, or copied repository.
+Each clone or worktree has a separate local ledger and lock. Never bypass a lock or budget by running live acquisition from another clone, worktree, or copied repository. The no-follow checks and same-inode release check fail closed against observed path replacement, but a process running as the same user can still race the final path check and unlink. Do not manipulate private paths while the runner is active; eliminating that cleanup race requires a stronger OS-level coordination boundary than this local script provides.
 
 ## Live observation — September 23, 2026
 
@@ -79,4 +87,4 @@ The pure scoring rules remain unchanged and provisional at their provider bounda
 
 Claude's review of `fa1249f` found redirect forwarding and concurrent reservation blockers and identified missing loop tests. The correction adds redirect rejection, an exclusive run lock, canonical paths, isolated key parsing, no-follow private-file operations, response-header-first accounting, and direct runner regressions. The full review and disposition are recorded in `docs/reviews/fa1249f.md`.
 
-This correction made **zero Nansen or other external calls** and consumed **zero credits**. It preserves the earlier one-attempt/one-credit evidence and the manually reported 1,095-credit pre-spike balance without inferring a current balance. Further pagination is unauthorized pending independent re-review.
+This correction made **zero Nansen or other external calls** and consumed **zero credits**. It preserves the earlier one-attempt/one-credit evidence and the manually reported 1,095-credit pre-spike balance without inferring a current balance. Claude's re-review accepted the two original blockers but found that the redirect regression asserted inside a callback whose error the runner intentionally catches. The prepared pagination change moves that assertion outside the callback and adds the bounded behavior above. Further pagination remains unauthorized pending review of the new commit.

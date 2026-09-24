@@ -40,11 +40,13 @@ The proposal targets ten real reviewed rounds and one complete live flow first, 
 
 ## Bounded contract spike — September 23, 2026
 
-The local spike is a server/local-only script and support module, not application integration. It defaults to dry-run, hard-allows one endpoint, uses a fixed bounded request, reserves each attempt durably before send, and permits no more than five attempts or five retained credits. Raw responses and the ledger remain in ignored private paths. Normal tests and application commands make no provider request.
+The local spike is a server/local-only script and support module, not application integration. It defaults to dry-run, hard-allows one endpoint, uses fixed bounded requests, reserves each attempt durably before send, and now permits no more than three total attempts or three retained credits for this contract milestone. Raw responses and the ledger remain in ignored private paths. Normal tests and application commands make no provider request; `npm test` automatically preloads the outbound-network guard.
 
 One explicit live request is sufficient for this milestone unless it fails transiently. The completed probe used one attempt and one provider-reported credit, so no retry or follow-up page was requested. `is_last_page=false` is evidence that the response page was incomplete, not authorization to mark coverage complete or continue acquisition.
 
 After review, the local safety boundary includes an exclusive filesystem lock around the complete live run, canonical repository-root paths, no-follow private-file operations, and `redirect: "error"`. Crash-left locks do not expire automatically. Separate clones and worktrees must not be used to bypass the local ledger because each has independent private state. These controls remain local spike controls, not a substitute for the future shared hosted reservation system.
+
+The prepared pagination probe is a separate mode requiring the exact flags `--live --pagination-probe`. It may start only from the ledger's exact one-attempt historical success state; the original page-1 mode requires an empty ledger and cannot spend continuation slots. Pagination requests page 2 once and page 3 only after a valid nonterminal page 2, with no retries and an unconditional stop after page 3. The historical attempt plus at most two new reservations exhausts the three-attempt ceiling. These pages cannot establish complete scoring coverage, and a separate future acquisition workflow must handle any later pagination.
 
 ## Offline skeleton milestone — September 22, 2026
 

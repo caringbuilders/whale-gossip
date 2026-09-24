@@ -32,6 +32,12 @@ Claude's review of `fa1249f` demonstrated that provider-call accounting must bou
 
 Credential isolation also requires selecting the source explicitly. `process.loadEnvFile` preserves an existing shell value and imports unrelated file entries, so the corrected runner parses only `NANSEN_API_KEY` from the canonical repository file. Header parsing precedes raw persistence so a storage failure cannot erase already observed charge evidence.
 
+Claude's re-review accepted the original redirect and concurrency fixes but exposed a testing lesson: an assertion thrown inside an injected callback can be caught by the code under test and therefore appear to pass without checking the intended property. Capture the observed option in the callback and assert after the runner returns or rejects. For paid-call controls, confirm important guards with a negative mutation that removes the guard and causes the test to fail.
+
+The prepared pagination mode treats the existing successful page-1 ledger entry as a fixed prerequisite and lowers the milestone ceiling to three total attempts. Page 2 can authorize page 3 only within the same locked run after a valid nonterminal response; neither page implies complete coverage. Standard tests now load the outbound-network guard themselves, avoiding reliance on a manually supplied `NODE_OPTIONS` prefix.
+
+Private-path hardening remains a fail-closed local control rather than protection from a malicious or mistaken process running as the same user. In particular, Node's path-based final `lstat` then `unlink` leaves a narrow same-user replacement race during lock cleanup. Operators must not alter the private paths while the script runs; hosted acquisition still requires a durable shared coordination mechanism.
+
 ## Nansen questions remaining after the bounded live contract check
 
 - Which verified Ethereum token contracts and historical periods provide sufficient qualifying trades and candidate variety?

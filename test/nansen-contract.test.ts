@@ -3,7 +3,17 @@
  * These tests never contact Nansen and do not validate provider behavior.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,11 +27,15 @@ import {
   PROBE_PAGE,
   PROBE_PER_PAGE,
   PROBE_TO_ISO,
+  acquireContractSpikeLock,
   assertAllowedEndpoint,
   buildProbeRequest,
   classifyHttpOutcome,
+  ensurePrivateDirectory,
+  readCredentialTextFile,
   requestFingerprint,
   summarizeDexTradesResponse,
+  writePrivateTextFileExclusive,
 } from "../lib/server/nansen-contract";
 import { resolveSpikePaths, runSpikeCommand } from "../lib/server/nansen-spike-runner";
 
@@ -130,12 +144,12 @@ test("durable ledger reserves before settlement, enforces the attempt cap, and s
 
   assert.throws(() => ledger.reserve(fingerprint, { page: 1, perPage: 3 }), /attempt cap/);
   assert.deepEqual(ledger.summarize(), {
-    attempts: 5,
-    settled: 5,
-    successful: 5,
-    reportedCreditsUsed: 5,
+    attempts: 3,
+    settled: 3,
+    successful: 3,
+    reportedCreditsUsed: 3,
     unknownChargeAttempts: 0,
-    retainedCredits: 5,
+    retainedCredits: 3,
   });
 
   const ledgerText = readFileSync(ledgerPath, "utf8");
@@ -180,8 +194,8 @@ test("retained-credit cap blocks another reservation before the attempt cap", as
   ledger.settle(reservation, {
     httpStatus: 200,
     latencyMs: 1,
-    reportedCreditCost: 5,
-    reportedCreditsUsed: 5,
+    reportedCreditCost: 3,
+    reportedCreditsUsed: 3,
     outcome: "success",
   });
   assert.throws(() => ledger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 }), /retained-credit cap/);
@@ -233,6 +247,63 @@ test("ledger and parent symlinks fail closed", async () => {
     () => linkedLedger.reserve(requestFingerprint(buildProbeRequest()), { page: 1, perPage: 3 }),
     /unsafe parent/,
   );
+});
+
+test("credential reads reject unsafe parents, file types, symlinks, and broad permissions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-credential-safety-"));
+  const missing = join(directory, "missing.env");
+  assert.throws(() => readCredentialTextFile(missing), /credential file is missing/);
+
+  const broad = join(directory, "broad.env");
+  writeFileSync(broad, "dummy\n", { mode: 0o644 });
+  assert.throws(() => readCredentialTextFile(broad), /unsafe permissions/);
+  chmodSync(broad, 0o600);
+  assert.equal(readCredentialTextFile(broad), "dummy\n");
+
+  const directoryAsFile = join(directory, "directory.env");
+  mkdirSync(directoryAsFile, { mode: 0o700 });
+  assert.throws(() => readCredentialTextFile(directoryAsFile), /unsafe file type/);
+
+  const linkedFile = join(directory, "linked.env");
+  symlinkSync(broad, linkedFile);
+  assert.throws(() => readCredentialTextFile(linkedFile), /unsafe file type/);
+
+  const realParent = join(directory, "real-parent");
+  mkdirSync(realParent, { mode: 0o700 });
+  const linkedParent = join(directory, "linked-parent");
+  symlinkSync(realParent, linkedParent, "dir");
+  assert.throws(() => readCredentialTextFile(join(linkedParent, "key.env")), /unsafe parent/);
+});
+
+test("private directory creation tolerates a safe EEXIST race and preserves restrictive modes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-private-mode-"));
+  const racedDirectory = join(directory, "created-concurrently");
+  let simulatedRace = false;
+  ensurePrivateDirectory(racedDirectory, (path, options) => {
+    mkdirSync(path, options);
+    simulatedRace = true;
+    throw Object.assign(new Error("synthetic EEXIST"), { code: "EEXIST" });
+  });
+  assert.equal(simulatedRace, true);
+  assert.equal(statSync(racedDirectory).mode & 0o077, 0);
+
+  const privateFile = join(racedDirectory, "private.json");
+  writePrivateTextFileExclusive(privateFile, "synthetic\n");
+  assert.equal(statSync(privateFile).mode & 0o077, 0);
+  assert.equal(readFileSync(privateFile, "utf8"), "synthetic\n");
+});
+
+test("lock release removes only the same inode", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "whale-gossip-lock-inode-"));
+  const lockPath = join(directory, "spike.lock");
+  const originalPath = join(directory, "original.lock");
+  const lock = acquireContractSpikeLock(lockPath);
+  renameSync(lockPath, originalPath);
+  writeFileSync(lockPath, "replacement\n", { mode: 0o600 });
+  assert.throws(() => lock.release(), /lock changed while held/);
+  assert.equal(readFileSync(lockPath, "utf8"), "replacement\n");
+  unlinkSync(lockPath);
+  unlinkSync(originalPath);
 });
 
 test("synthetic response parsing reports shape without leaking response values", () => {
