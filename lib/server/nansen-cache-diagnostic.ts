@@ -14,10 +14,10 @@ import {
 import { isAbsolute, join, parse, resolve } from "node:path";
 
 import {
-  ACQUISITION_ADAPTER_VERSION,
-  ACQUISITION_SCHEMA_VERSION,
-  ACQUISITION_STATE_VERSION,
   ACQUISITION_TOKEN_UNIVERSE,
+  LEGACY_ACQUISITION_ADAPTER_VERSION,
+  LEGACY_ACQUISITION_SCHEMA_VERSION,
+  LEGACY_ACQUISITION_STATE_VERSION,
 } from "./nansen-acquisition";
 
 const ETHEREUM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -183,9 +183,9 @@ function readStateIndex(path: string): Map<string, StateReference> {
   const value = readPrivateJsonReadonly(path);
   if (
     !isRecord(value) ||
-    value.stateVersion !== ACQUISITION_STATE_VERSION ||
-    value.adapterVersion !== ACQUISITION_ADAPTER_VERSION ||
-    value.schemaVersion !== ACQUISITION_SCHEMA_VERSION ||
+    value.stateVersion !== LEGACY_ACQUISITION_STATE_VERSION ||
+    value.adapterVersion !== LEGACY_ACQUISITION_ADAPTER_VERSION ||
+    value.schemaVersion !== LEGACY_ACQUISITION_SCHEMA_VERSION ||
     !Array.isArray(value.work)
   ) {
     throw new Error("Diagnostic acquisition state is malformed or version-mismatched");

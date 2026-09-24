@@ -1,6 +1,6 @@
 # Nansen acquisition design and runbook
 
-This document describes the corrected boundary for acquiring private real-round candidates. The first design was rejected in review before it made any provider calls. Adapter/state/schema version 3 is implemented and tested only with synthetic responses and temporary private roots. Normal development, tests, dry-run, status, compilation, and the public application remain network-free.
+This document describes the corrected boundary for acquiring private real-round candidates. The first design was rejected in review before it made any provider calls. The six-call pilot and its version 3 state/cache are preserved private evidence. Adapter/state/schema version 4 adds a narrow timestamp correction and separate derived state/cache. Normal development, tests, dry-run, status, cache diagnosis, cache reprocessing, compilation, and the public application remain network-free.
 
 ## Fixed provider boundary
 
@@ -30,9 +30,9 @@ Coverage supplied to rules version 4 is derived from the work item's successfull
 
 ## Conservative normalization and compilation
 
-Every relied-upon row field is checked at runtime. The adapter requires exact millisecond ISO UTC timestamps; valid Ethereum trader/token addresses and transaction hashes normalized to lowercase; `BUY` or `SELL`; a finite, nonnegative numeric `estimated_value_usd` that is not signed zero; the requested token; and, for coverage, the requested candidate wallet.
+Every relied-upon row field is checked at runtime. Adapter version 4 accepts exactly `YYYY-MM-DDTHH:mm:ssZ` or `YYYY-MM-DDTHH:mm:ss.SSSZ`. Whole-second input is represented canonically as the same instant ending in `.000Z`, while private metadata retains `whole-second` as the source precision. This does not claim the provider supplied millisecond precision. Offsets, date-only values, other fractional precision, malformed or impossible dates, whitespace, and noncanonical parseable strings remain invalid. The adapter also requires valid Ethereum trader/token addresses and transaction hashes normalized to lowercase; `BUY` or `SELL`; a finite, nonnegative numeric `estimated_value_usd` that is not signed zero; the requested token; and, for coverage, the requested candidate wallet.
 
-Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 3 continues to derive private `derived-v1:<sha256>` event IDs from the canonical full provider row; the label describes the derivation format, not the adapter version or a provider guarantee. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, aggregate reports, logs, or public output.
+Nansen did not expose a provider-stable event/leg ID in the bounded spike. Adapter version 4 continues to derive private `derived-v1:<sha256>` event IDs from the canonical full provider row; the label describes the derivation format, not the adapter version or a provider guarantee. Timestamp canonicalization makes whole-second and exact `.000Z` representations of the same otherwise identical row share an ID. Multiple distinct matching rows sharing one transaction hash reject the candidate as unresolved provider-leg ambiguity. Provider labels may exist in ignored raw/cache files but are not copied into normalized events, candidate summaries, aggregate reports, logs, or public output.
 
 Only complete normalized evidence is offered to `compileRound` in `lib/rules.ts`; scoring is not reimplemented in the adapter. Rejected or incomplete normalization has no coverage and cannot produce Buy, Sell, or No trade.
 
@@ -41,9 +41,9 @@ Only complete normalized evidence is offered to `compileRound` in `lib/rules.ts`
 All live artifacts use ignored paths:
 
 - ledger and lock: `data/ledgers/nansen-acquisition.json` and `.lock`;
-- resumable state, versioned request cache, and raw pages: `data/private/nansen-acquisition/`;
-- private candidate manifest: `data/private/nansen-acquisition/candidate-manifest.json`;
-- sanitized aggregate report: `data/private/nansen-acquisition/aggregate-report.json`.
+- preserved version 3 state/cache: `data/private/nansen-acquisition/state.json` and `cache-v3/`;
+- version 4 derived state/cache/provenance: `state-v4.json`, `cache-v4/`, and `reprocessing-v4.json` under the same private root;
+- raw pages, private candidate manifests, and sanitized aggregate reports remain under `data/private/nansen-acquisition/`, with version 4 outputs named separately.
 
 Private directories require mode `0700`; files require `0600`, current-user ownership, regular-file types, and no symlink traversal. Atomic JSON writes use a restrictive temporary file, rename, and containing-directory `fsync` where supported. A reservation is durably written before fetch; failure to persist or directory-sync it prevents the request. Fingerprints include adapter, state, and schema versions, request purpose, page, date bounds, token, chain, flags, ordering, and candidate wallet filter. Discovery and coverage cannot share a cache identity. Cache hits make zero upstream calls and do not increment attempt, success, discovery-call, or coverage-call counters.
 
@@ -75,16 +75,26 @@ Keyless status reads only the new acquisition ledger:
 npm run nansen:acquire -- --status
 ```
 
-After independent review and new explicit authorization, the first bounded pilot command is exactly:
+The completed one-time offline reprocessing command was:
+
+```bash
+npm run nansen:acquire -- --reprocess-cache
+```
+
+It reads no credential and makes no network request. It takes the canonical acquisition lock, verifies exactly six known version 3 discovery caches against deterministic state and settled ledger attempts, preserves them, and writes separate durable version 4 derivatives with private provenance. A completed result is idempotent; partial or unexpected version 4 output requires manual review and is never overwritten or replayed automatically.
+
+Any future live continuation requires independent review and new explicit authorization. The live command shape remains:
 
 ```bash
 npm run nansen:acquire -- --live --max-new-calls 10 --target-total-success 120
 ```
 
-That command has not been run and is not authorized by credential presence. Before authorization, review canonical private-path metadata, the absence or disposition of any lock/pending attempt, remaining allowances, and the corrected commit. Do not run it from another clone or worktree.
+Do not run that command from this milestone. Credential presence, the six-call pilot, cached candidate discovery, or a planned coverage item does not authorize it. Before any later authorization, review canonical private-path metadata, the absence or disposition of any lock/pending attempt, remaining allowances, the version 4 correction, and the private candidate evidence. Do not run it from another clone or worktree.
 
 ## Evidence and unresolved provider questions
 
-This correction used synthetic responses and temporary dummy roots only. It made zero Nansen or other external application calls, used zero credits, did not read the canonical credential, and did not inspect real ledgers, acquisition state, caches, locks, manifests, or raw responses.
+The canonical offline reprocessing ran once after synthetic tests. Its allowlisted report recorded six cache pages and 600 rows: 600 valid, zero invalid, 600 whole-second, zero exact-millisecond, one qualifying row, one distinct candidate, zero categorical rejections, and one planned coverage work item. It recorded zero network attempts, zero new ledger attempts, zero new successes, and zero new credits. Keyless status remained six attempts, six successes, six reported credits, six retained credits, zero coverage attempts, and nine combined successes. The command parsed protected cache/state internally but emitted no raw rows, identities, hashes, labels, exact timestamps, exact values, candidate IDs, or request bodies. It did not read the canonical credential or alter the ledger or version 3 evidence.
+
+The version 4 derivatives are cached discovery evidence, not complete candidate coverage or a verified historical round. The single planned coverage item has not been requested. `filters.trader_address` remains live-unverified, and no further live call is authorized.
 
 Still unresolved: live acceptance of `filters.trader_address`; direction semantics; stable row and leg identity; multi-leg representation; corrections across retrievals; USD semantics; inclusive date-boundary behavior; terminal pagination and cross-page stability; discovery density and candidate yield; full-window cost; and whether reviewed real rounds may be redistributed. No real candidate is accepted, exported, or published until private pilot evidence is reviewed against these assumptions.

@@ -13,7 +13,9 @@ import {
   buildDiscoveryPlan,
   buildSanitizedAcquisitionReport,
   compileCoveredCandidate,
+  legacyAcquisitionRequestFingerprintV3,
   normalizeCompletePages,
+  normalizeProviderTimestamp,
   parseProviderPage,
   summarizeDiscoveryPage,
   validateCoveragePage,
@@ -188,9 +190,41 @@ test("inclusive provider overlap is reduced to the required local half-open inte
   );
 });
 
-test("normalization requires millisecond timestamps, addresses, hashes, actions, and valid USD", () => {
+test("timestamp normalization accepts only canonical whole seconds or exact milliseconds", () => {
+  assert.deepEqual(normalizeProviderTimestamp("2026-09-01T00:00:00Z"), {
+    occurredAtMs: Date.parse("2026-09-01T00:00:00.000Z"),
+    canonicalIso: "2026-09-01T00:00:00.000Z",
+    sourcePrecision: "whole-second",
+  });
+  assert.deepEqual(normalizeProviderTimestamp("2026-09-01T00:00:00.123Z"), {
+    occurredAtMs: Date.parse("2026-09-01T00:00:00.123Z"),
+    canonicalIso: "2026-09-01T00:00:00.123Z",
+    sourcePrecision: "exact-millisecond",
+  });
+  for (const invalid of [
+    undefined,
+    null,
+    0,
+    "2026-09-01",
+    "2026-09-01T00:00:00.1Z",
+    "2026-09-01T00:00:00.12Z",
+    "2026-09-01T00:00:00.1234Z",
+    "2026-09-01T00:00:00+00:00",
+    "2026-09-01T00:00:00.000+00:00",
+    "2026-09-01T00:00:00.000Z ",
+    " 2026-09-01T00:00:00Z",
+    "2026-09-01 00:00:00Z",
+    "2026-02-30T00:00:00Z",
+    "2026-13-01T00:00:00.000Z",
+    "2026-09-01T24:00:00Z",
+  ]) {
+    assert.equal(normalizeProviderTimestamp(invalid), null);
+  }
+});
+
+test("normalization requires canonical timestamps, addresses, hashes, actions, and valid USD", () => {
   const invalidRows = [
-    row({ block_timestamp: "2026-09-01T00:00:00Z" }),
+    row({ block_timestamp: "2026-09-01T00:00:00.12Z" }),
     row({ trader_address: "0x1234" }),
     row({ transaction_hash: "0x1234" }),
     row({ token_address: OTHER_WALLET }),
@@ -204,6 +238,27 @@ test("normalization requires millisecond timestamps, addresses, hashes, actions,
   for (const invalid of invalidRows) {
     assert.equal(normalizeCompletePages([parsedPage(1, [invalid], true)], coveragePlan()).status, "rejected");
   }
+});
+
+test("whole-second timestamps preserve half-open coverage boundaries", () => {
+  const plan = coveragePlan();
+  const lower = new Date(plan.localFromMs).toISOString().replace(".000Z", "Z");
+  const upper = new Date(plan.localToMsExclusive).toISOString().replace(".000Z", "Z");
+  const normalized = normalizeCompletePages(
+    [
+      parsedPage(
+        1,
+        [
+          row({ block_timestamp: lower, transaction_hash: hash(31) }),
+          row({ block_timestamp: upper, transaction_hash: hash(32) }),
+        ],
+        true,
+      ),
+    ],
+    plan,
+  );
+  assert.equal(normalized.status, "complete");
+  assert.deepEqual(normalized.events.map((event) => event.occurredAtMs), [plan.localFromMs]);
 });
 
 test("addresses and hashes normalize while derived IDs remain deterministic", () => {
@@ -220,6 +275,25 @@ test("addresses and hashes normalize while derived IDs remain deterministic", ()
   assert.equal(first.events[0].transactionHash, hash(10));
   assert.equal(first.events[0].eventId, second.events[0].eventId);
   assert.match(first.events[0].eventId, /^derived-v1:[0-9a-f]{64}$/);
+});
+
+test("whole-second canonicalization and input order produce deterministic events", () => {
+  const whole = row({ block_timestamp: "2026-08-31T00:00:00Z", transaction_hash: hash(40) });
+  const milliseconds = row({ block_timestamp: "2026-08-30T00:00:00.000Z", transaction_hash: hash(41) });
+  const first = normalizeCompletePages([parsedPage(1, [whole, milliseconds], true)], coveragePlan());
+  const second = normalizeCompletePages([parsedPage(1, [milliseconds, whole], true)], coveragePlan());
+  assert.equal(first.status, "complete");
+  assert.equal(second.status, "complete");
+  assert.deepEqual(first.events, second.events);
+
+  const sameInstantWhole = normalizeCompletePages([parsedPage(1, [whole], true)], coveragePlan());
+  const sameInstantMilliseconds = normalizeCompletePages(
+    [parsedPage(1, [{ ...whole, block_timestamp: "2026-08-31T00:00:00.000Z" }], true)],
+    coveragePlan(),
+  );
+  assert.equal(sameInstantWhole.status, "complete");
+  assert.equal(sameInstantMilliseconds.status, "complete");
+  assert.equal(sameInstantWhole.events[0].eventId, sameInstantMilliseconds.events[0].eventId);
 });
 
 test("exact and cross-page candidate duplicates reject instead of collapsing", () => {
@@ -408,6 +482,24 @@ test("complete evidence compiles only through rules version 4", () => {
   assert.equal(result.coverage?.answerWindow.toMsExclusive, CUTOFF + ANSWER_WINDOW_MS);
 });
 
+test("equal whole-second material trades remain ambiguous independent of provider order", () => {
+  const timestamp = new Date(CUTOFF).toISOString().replace(".000Z", "Z");
+  const buy = row({ block_timestamp: timestamp, transaction_hash: hash(21), estimated_value_usd: 2_500, action: "BUY" });
+  const sell = row({ block_timestamp: timestamp, transaction_hash: hash(22), estimated_value_usd: 2_500, action: "SELL" });
+  for (const answerRows of [[buy, sell], [sell, buy]]) {
+    const normalized = normalizeCompletePages(
+      [parsedPage(1, completeCandidateRows(answerRows), true)],
+      coveragePlan(),
+    );
+    const result = compileCoveredCandidate(candidate(), normalized);
+    assert.equal(result.compilerResult?.status, "unscorable");
+    assert.equal(
+      result.compilerResult?.status === "unscorable" && result.compilerResult.reason.code,
+      "tied-first-events",
+    );
+  }
+});
+
 test("coverage evidence comes from actual requested bounds and rules reject one-millisecond shrinkage", () => {
   const base = normalizeCompletePages([parsedPage(1, completeCandidateRows(), true)], coveragePlan());
   assert.equal(base.status, "complete");
@@ -483,12 +575,16 @@ test("request fingerprints include version, purpose, page, and candidate wallet 
     acquisitionRequestFingerprint(walletRequest, "coverage"),
     acquisitionRequestFingerprint(otherWalletRequest, "coverage"),
   );
+  assert.notEqual(
+    acquisitionRequestFingerprint(first, "discovery"),
+    legacyAcquisitionRequestFingerprintV3(first, "discovery"),
+  );
   assert.match(acquisitionRequestFingerprint(first, "discovery"), /^[0-9a-f]{64}$/);
 });
 
 test("sanitized report allowlist drops injected private fields", () => {
   const report = buildSanitizedAcquisitionReport({
-    reportVersion: 3,
+    reportVersion: 4,
     discoveryCalls: 1,
     coverageCalls: 2,
     rows: 3,

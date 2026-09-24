@@ -16,10 +16,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  ACQUISITION_ADAPTER_VERSION,
-  ACQUISITION_SCHEMA_VERSION,
-  ACQUISITION_STATE_VERSION,
   ACQUISITION_TOKEN_UNIVERSE,
+  LEGACY_ACQUISITION_ADAPTER_VERSION,
+  LEGACY_ACQUISITION_SCHEMA_VERSION,
+  LEGACY_ACQUISITION_STATE_VERSION,
 } from "../lib/server/nansen-acquisition";
 import { resolveAcquisitionPaths, runAcquisitionCommand } from "../lib/server/nansen-acquisition-runner";
 import {
@@ -44,6 +44,14 @@ interface SyntheticFixture {
   readonly cachePaths: readonly string[];
 }
 
+function diagnosticPaths(paths: ReturnType<typeof resolveAcquisitionPaths>) {
+  return {
+    repositoryRoot: paths.repositoryRoot,
+    state: paths.legacyState,
+    cacheDirectory: paths.legacyCacheDirectory,
+  };
+}
+
 function writePrivateJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
@@ -58,8 +66,8 @@ function syntheticFixture(
   const privateRoot = join(repositoryRoot, "data", "private", "nansen-acquisition");
   mkdirSync(privateRoot, { recursive: true, mode: 0o700 });
   chmodSync(privateRoot, 0o700);
-  mkdirSync(paths.cacheDirectory, { mode: 0o700 });
-  chmodSync(paths.cacheDirectory, 0o700);
+  mkdirSync(paths.legacyCacheDirectory, { mode: 0o700 });
+  chmodSync(paths.legacyCacheDirectory, 0o700);
 
   const discoveryFingerprint = "a".repeat(64);
   const coverageFingerprint = "b".repeat(64);
@@ -69,10 +77,10 @@ function syntheticFixture(
     { purpose: "discovery", completedPages: [discoveryReference] },
     ...(options.includeCoverage ? [{ purpose: "coverage", completedPages: [coverageReference] }] : []),
   ];
-  writePrivateJson(paths.state, {
-    stateVersion: ACQUISITION_STATE_VERSION,
-    adapterVersion: ACQUISITION_ADAPTER_VERSION,
-    schemaVersion: ACQUISITION_SCHEMA_VERSION,
+  writePrivateJson(paths.legacyState, {
+    stateVersion: LEGACY_ACQUISITION_STATE_VERSION,
+    adapterVersion: LEGACY_ACQUISITION_ADAPTER_VERSION,
+    schemaVersion: LEGACY_ACQUISITION_SCHEMA_VERSION,
     work,
     injectedWallet: WALLET,
     injectedKey: "SYNTHETIC-PRIVATE-KEY",
@@ -84,7 +92,7 @@ function syntheticFixture(
     requestId: string,
     cacheRows: readonly Record<string, unknown>[],
   ) => {
-    const path = join(paths.cacheDirectory, `${fingerprint}.json`);
+    const path = join(paths.legacyCacheDirectory, `${fingerprint}.json`);
     writePrivateJson(path, {
       cacheVersion: 3,
       fingerprint,
@@ -104,7 +112,7 @@ function syntheticFixture(
   };
   writeCache(discoveryFingerprint, discoveryReference.requestId, rows);
   if (options.includeCoverage) writeCache(coverageFingerprint, coverageReference.requestId, rows);
-  return { paths, statePath: paths.state, cachePaths };
+  return { paths, statePath: paths.legacyState, cachePaths };
 }
 
 function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -145,7 +153,7 @@ test("cache diagnostic categorizes shapes and emits only allowlisted aggregates"
     { includeCoverage: true },
   );
 
-  const report = diagnoseCanonicalDiscoveryCache(fixture.paths);
+  const report = diagnoseCanonicalDiscoveryCache(diagnosticPaths(fixture.paths));
   assert.deepEqual(report, {
     diagnosticVersion: 1,
     mode: "diagnose-cache",
@@ -243,16 +251,16 @@ test("diagnostic command is keyless, network-free, and non-mutating", async () =
 
 test("unknown, malformed, and symlinked cache inputs fail closed without private output", () => {
   const unknown = syntheticFixture([row()]);
-  writeFileSync(join(unknown.paths.cacheDirectory, "PRIVATE-UNKNOWN.txt"), "PRIVATE UNKNOWN", { mode: 0o600 });
+  writeFileSync(join(unknown.paths.legacyCacheDirectory, "PRIVATE-UNKNOWN.txt"), "PRIVATE UNKNOWN", { mode: 0o600 });
   assert.throws(
-    () => diagnoseCanonicalDiscoveryCache(unknown.paths),
+    () => diagnoseCanonicalDiscoveryCache(diagnosticPaths(unknown.paths)),
     (error: unknown) => error instanceof Error && /unknown or unsafe entry/.test(error.message) && !/PRIVATE/.test(error.message),
   );
 
   const malformed = syntheticFixture([row()]);
   writeFileSync(malformed.cachePaths[0], "PRIVATE MALFORMED CACHE", { mode: 0o600 });
   assert.throws(
-    () => diagnoseCanonicalDiscoveryCache(malformed.paths),
+    () => diagnoseCanonicalDiscoveryCache(diagnosticPaths(malformed.paths)),
     (error: unknown) => error instanceof Error && /malformed JSON/.test(error.message) && !/PRIVATE/.test(error.message),
   );
 
@@ -263,7 +271,7 @@ test("unknown, malformed, and symlinked cache inputs fail closed without private
   unlinkSync(cachePath);
   symlinkSync(target, cachePath);
   assert.throws(
-    () => diagnoseCanonicalDiscoveryCache(linked.paths),
+    () => diagnoseCanonicalDiscoveryCache(diagnosticPaths(linked.paths)),
     (error: unknown) => error instanceof Error && /unknown or unsafe entry/.test(error.message) && !/PRIVATE/.test(error.message),
   );
 });

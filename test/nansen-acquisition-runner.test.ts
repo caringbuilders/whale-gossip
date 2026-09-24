@@ -90,6 +90,7 @@ test("argument parsing requires explicit bounded live flags and rejects contradi
   assert.deepEqual(parseAcquisitionArguments([]), { mode: "dry-run" });
   assert.deepEqual(parseAcquisitionArguments(["--status"]), { mode: "status" });
   assert.deepEqual(parseAcquisitionArguments(["--diagnose-cache"]), { mode: "diagnose-cache" });
+  assert.deepEqual(parseAcquisitionArguments(["--reprocess-cache"]), { mode: "reprocess-cache" });
   assert.deepEqual(
     parseAcquisitionArguments(["--live", "--max-new-calls", "10", "--target-total-success", "120"]),
     { mode: "live", maxNewCalls: 10, targetTotalSuccess: 120 },
@@ -109,6 +110,8 @@ test("argument parsing requires explicit bounded live flags and rejects contradi
     ["--status", "--status"],
     ["--diagnose-cache", "--live"],
     ["--diagnose-cache", "--max-new-calls", "1"],
+    ["--reprocess-cache", "--live"],
+    ["--reprocess-cache", "--max-new-calls", "1"],
     ["--unknown"],
   ]) {
     assert.throws(() => parseAcquisitionArguments(arguments_), /Unsupported|must/);
@@ -485,12 +488,14 @@ test("cache hits complete deterministic discovery work without an upstream call"
     writeFileSync(
       join(paths.cacheDirectory, `${fingerprint}.json`),
       `${JSON.stringify({
-        cacheVersion: 3,
+        cacheVersion: 4,
         fingerprint,
         retrievalTimeMs: FIXED_NOW.getTime(),
         requestId: `cached-${fingerprint.slice(0, 8)}`,
         reportedCreditCost: 1,
         latencyMs: 100,
+        sourceTimestampPrecisions: [],
+        provenance: { kind: "provider-response" },
         response: { data: [], pagination: { page: 1, per_page: 100, is_last_page: true } },
       })}\n`,
       { mode: 0o600 },
@@ -585,7 +590,7 @@ test("a lock held by another process blocks scratch acquisition before reserve o
 });
 
 test("malformed and truncated private workflow state fail closed before fetch", async () => {
-  for (const [name, state] of [["malformed", "{}\n"], ["truncated", '{"stateVersion":3']] as const) {
+  for (const [name, state] of [["malformed", "{}\n"], ["truncated", '{"stateVersion":4']] as const) {
     const paths = temporaryPaths(`whale-acquisition-state-${name}-`);
     mkdirSync(join(paths.repositoryRoot, "data", "private", "nansen-acquisition"), {
       recursive: true,

@@ -16,9 +16,12 @@ import { NANSEN_DEX_TRADES_ENDPOINT, PROBE_TOKEN_ADDRESS } from "./nansen-contra
 
 export { NANSEN_DEX_TRADES_ENDPOINT };
 
-export const ACQUISITION_ADAPTER_VERSION = "3";
-export const ACQUISITION_STATE_VERSION = 3;
-export const ACQUISITION_SCHEMA_VERSION = 3;
+export const LEGACY_ACQUISITION_ADAPTER_VERSION = "3";
+export const LEGACY_ACQUISITION_STATE_VERSION = 3;
+export const LEGACY_ACQUISITION_SCHEMA_VERSION = 3;
+export const ACQUISITION_ADAPTER_VERSION = "4";
+export const ACQUISITION_STATE_VERSION = 4;
+export const ACQUISITION_SCHEMA_VERSION = 4;
 export const ACQUISITION_PER_PAGE = 100;
 export const ACQUISITION_MAX_ATTEMPTS = 130;
 export const ACQUISITION_MAX_RETAINED_CREDITS = 130;
@@ -35,6 +38,15 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const ETHEREUM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ETHEREUM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EXACT_MILLISECOND_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const WHOLE_SECOND_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+export type SourceTimestampPrecision = "whole-second" | "exact-millisecond";
+
+export interface NormalizedProviderTimestamp {
+  readonly occurredAtMs: number;
+  readonly canonicalIso: string;
+  readonly sourcePrecision: SourceTimestampPrecision;
+}
 
 export interface AcquisitionToken {
   readonly symbol: string;
@@ -134,7 +146,7 @@ export interface PrivateCandidateRecord {
 }
 
 export interface SanitizedAcquisitionReport {
-  readonly reportVersion: 3;
+  readonly reportVersion: 4;
   readonly discoveryCalls: number;
   readonly coverageCalls: number;
   readonly rows: number;
@@ -251,10 +263,19 @@ function normalizeHash(value: unknown): string | null {
   return typeof value === "string" && ETHEREUM_TRANSACTION_HASH.test(value) ? value.toLowerCase() : null;
 }
 
-function normalizeTimestamp(value: unknown): number | null {
-  if (typeof value !== "string" || !EXACT_MILLISECOND_ISO.test(value)) return null;
+export function normalizeProviderTimestamp(value: unknown): NormalizedProviderTimestamp | null {
+  if (typeof value !== "string") return null;
+  const sourcePrecision: SourceTimestampPrecision | null = EXACT_MILLISECOND_ISO.test(value)
+    ? "exact-millisecond"
+    : WHOLE_SECOND_ISO.test(value)
+      ? "whole-second"
+      : null;
+  if (sourcePrecision === null) return null;
   const parsed = Date.parse(value);
-  return isSafeTimestamp(parsed) && new Date(parsed).toISOString() === value ? parsed : null;
+  if (!isSafeTimestamp(parsed)) return null;
+  const canonicalIso = new Date(parsed).toISOString();
+  const expected = sourcePrecision === "whole-second" ? value.slice(0, -1) + ".000Z" : value;
+  return canonicalIso === expected ? { occurredAtMs: parsed, canonicalIso, sourcePrecision } : null;
 }
 
 function isValidUsd(value: unknown): value is number {
@@ -298,6 +319,21 @@ export function acquisitionRequestFingerprint(
       adapterVersion: ACQUISITION_ADAPTER_VERSION,
       stateVersion: ACQUISITION_STATE_VERSION,
       schemaVersion: ACQUISITION_SCHEMA_VERSION,
+      purpose,
+      request,
+    }),
+  );
+}
+
+export function legacyAcquisitionRequestFingerprintV3(
+  request: AcquisitionRequest,
+  purpose: PlannedRequest["purpose"],
+): string {
+  return sha256(
+    canonicalJson({
+      adapterVersion: LEGACY_ACQUISITION_ADAPTER_VERSION,
+      stateVersion: LEGACY_ACQUISITION_STATE_VERSION,
+      schemaVersion: LEGACY_ACQUISITION_SCHEMA_VERSION,
       purpose,
       request,
     }),
@@ -414,11 +450,12 @@ interface NormalizedRow {
   readonly event: NormalizedTradeEvent;
   readonly fingerprint: string;
   readonly conflictKey: string;
+  readonly sourceTimestampPrecision: SourceTimestampPrecision;
 }
 
 function normalizeRow(row: Record<string, unknown>, expectedToken: string | null): NormalizedRow | string {
-  const occurredAtMs = normalizeTimestamp(row.block_timestamp);
-  if (occurredAtMs === null) return "timestamp-precision-or-value-invalid";
+  const timestamp = normalizeProviderTimestamp(row.block_timestamp);
+  if (timestamp === null) return "timestamp-precision-or-value-invalid";
   const transactionHash = normalizeHash(row.transaction_hash);
   if (transactionHash === null) return "transaction-hash-invalid";
   const wallet = normalizeAddress(row.trader_address);
@@ -429,21 +466,22 @@ function normalizeRow(row: Record<string, unknown>, expectedToken: string | null
   if (action === null) return "action-invalid";
   if (!isValidUsd(row.estimated_value_usd)) return "usd-value-invalid";
 
-  const fingerprint = sha256(canonicalJson(row));
+  const fingerprint = sha256(canonicalJson({ ...row, block_timestamp: timestamp.canonicalIso }));
   const event: NormalizedTradeEvent = {
     eventId: `derived-v1:${fingerprint}`,
     chain: ETHEREUM_CHAIN,
     token,
     wallet,
     transactionHash,
-    occurredAtMs,
+    occurredAtMs: timestamp.occurredAtMs,
     action,
     usdValue: row.estimated_value_usd,
   };
   return {
     event,
     fingerprint,
-    conflictKey: [transactionHash, wallet, token, String(occurredAtMs), action].join(":"),
+    conflictKey: [transactionHash, wallet, token, String(timestamp.occurredAtMs), action].join(":"),
+    sourceTimestampPrecision: timestamp.sourcePrecision,
   };
 }
 
@@ -762,7 +800,7 @@ export function compileCoveredCandidate(
 
 export function buildSanitizedAcquisitionReport(input: SanitizedAcquisitionReport): SanitizedAcquisitionReport {
   return {
-    reportVersion: 3,
+    reportVersion: 4,
     discoveryCalls: input.discoveryCalls,
     coverageCalls: input.coverageCalls,
     rows: input.rows,

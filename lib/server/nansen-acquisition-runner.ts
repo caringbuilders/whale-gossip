@@ -1,7 +1,17 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fsyncSync, lstatSync, openSync, renameSync, unlinkSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  type Dirent,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { spawnSync } from "node:child_process";
@@ -29,18 +39,22 @@ import {
   buildSanitizedAcquisitionReport,
   compileCoveredCandidate,
   normalizeCompletePages,
+  normalizeProviderTimestamp,
   parseProviderPage,
   summarizeDiscoveryPage,
   validateCoveragePage,
+  legacyAcquisitionRequestFingerprintV3,
   type AcquisitionToken,
   type CoveragePageEvidence,
   type CoveragePageRejectionReason,
   type DiscoveredCandidate,
+  type DiscoveryValidationReason,
   type DiscoveryPageEvidence,
   type PlannedRequest,
   type PrivateCandidateRecord,
   type ProviderPage,
   type SanitizedAcquisitionReport,
+  type SourceTimestampPrecision,
 } from "./nansen-acquisition";
 import {
   diagnoseCanonicalDiscoveryCache,
@@ -67,9 +81,12 @@ export interface AcquisitionPaths {
   readonly environmentFile: string;
   readonly ledger: string;
   readonly lock: string;
+  readonly legacyState: string;
   readonly state: string;
   readonly rawDirectory: string;
+  readonly legacyCacheDirectory: string;
   readonly cacheDirectory: string;
+  readonly reprocessingManifest: string;
   readonly candidateManifest: string;
   readonly aggregateReport: string;
 }
@@ -83,11 +100,14 @@ export function resolveAcquisitionPaths(repositoryRoot = ACQUISITION_REPOSITORY_
     environmentFile: join(canonicalRoot, ".env.local"),
     ledger,
     lock: `${ledger}.lock`,
-    state: join(privateRoot, "state.json"),
+    legacyState: join(privateRoot, "state.json"),
+    state: join(privateRoot, "state-v4.json"),
     rawDirectory: join(privateRoot, "raw"),
-    cacheDirectory: join(privateRoot, "cache-v3"),
-    candidateManifest: join(privateRoot, "candidate-manifest.json"),
-    aggregateReport: join(privateRoot, "aggregate-report.json"),
+    legacyCacheDirectory: join(privateRoot, "cache-v3"),
+    cacheDirectory: join(privateRoot, "cache-v4"),
+    reprocessingManifest: join(privateRoot, "reprocessing-v4.json"),
+    candidateManifest: join(privateRoot, "candidate-manifest-v4.json"),
+    aggregateReport: join(privateRoot, "aggregate-report-v4.json"),
   };
 }
 
@@ -95,12 +115,14 @@ export type AcquisitionCommand =
   | { readonly mode: "dry-run" }
   | { readonly mode: "status" }
   | { readonly mode: "diagnose-cache" }
+  | { readonly mode: "reprocess-cache" }
   | { readonly mode: "live"; readonly maxNewCalls: number; readonly targetTotalSuccess: 120 };
 
 export function parseAcquisitionArguments(arguments_: readonly string[]): AcquisitionCommand {
   if (arguments_.length === 0) return { mode: "dry-run" };
   if (arguments_.length === 1 && arguments_[0] === "--status") return { mode: "status" };
   if (arguments_.length === 1 && arguments_[0] === "--diagnose-cache") return { mode: "diagnose-cache" };
+  if (arguments_.length === 1 && arguments_[0] === "--reprocess-cache") return { mode: "reprocess-cache" };
   if (
     arguments_.length === 5 &&
     arguments_[0] === "--live" &&
@@ -120,7 +142,7 @@ export function parseAcquisitionArguments(arguments_: readonly string[]): Acquis
     };
   }
   throw new Error(
-    "Unsupported arguments; use no arguments, --status, --diagnose-cache, or --live --max-new-calls N --target-total-success 120",
+    "Unsupported arguments; use no arguments, --status, --diagnose-cache, --reprocess-cache, or --live --max-new-calls N --target-total-success 120",
   );
 }
 
@@ -196,6 +218,17 @@ function assertSafeExistingPrivateFile(path: string): void {
     throw new Error("Private acquisition file has unsafe ownership");
   }
   if ((stat.mode & 0o077) !== 0) throw new Error("Private acquisition file permissions are too broad");
+}
+
+function assertSafeExistingPrivateDirectory(path: string): void {
+  const stat = lstatSync(path);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error("Private acquisition path is not a real directory");
+  }
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    throw new Error("Private acquisition directory has unsafe ownership");
+  }
+  if ((stat.mode & 0o077) !== 0) throw new Error("Private acquisition directory permissions are too broad");
 }
 
 export interface AcquisitionDurabilityHooks {
@@ -453,6 +486,14 @@ interface WorkflowState {
   readonly adapterVersion: typeof ACQUISITION_ADAPTER_VERSION;
   readonly schemaVersion: typeof ACQUISITION_SCHEMA_VERSION;
   readonly initializedAtMs: number;
+  readonly provenance:
+    | { readonly kind: "fresh" }
+    | {
+        readonly kind: "reprocessed-v3-discovery";
+        readonly reprocessedAtMs: number;
+        readonly sourceStateVersion: 3;
+        readonly sourceAttemptIds: readonly string[];
+      };
   readonly work: readonly WorkItem[];
   readonly candidates: readonly DiscoveredCandidate[];
   readonly results: readonly PrivateCandidateRecord[];
@@ -462,6 +503,25 @@ interface WorkflowState {
 }
 
 interface CachedPage {
+  readonly cacheVersion: 4;
+  readonly fingerprint: string;
+  readonly retrievalTimeMs: number;
+  readonly requestId: string;
+  readonly reportedCreditCost: number | null;
+  readonly latencyMs: number;
+  readonly sourceTimestampPrecisions: readonly (SourceTimestampPrecision | null)[];
+  readonly provenance:
+    | { readonly kind: "provider-response" }
+    | {
+        readonly kind: "reprocessed-v3-cache";
+        readonly sourceAttemptId: string;
+        readonly sourceFingerprint: string;
+        readonly sourceCacheVersion: 3;
+      };
+  readonly response: unknown;
+}
+
+interface LegacyCachedPageV3 {
   readonly cacheVersion: 3;
   readonly fingerprint: string;
   readonly retrievalTimeMs: number;
@@ -469,6 +529,58 @@ interface CachedPage {
   readonly reportedCreditCost: number | null;
   readonly latencyMs: number;
   readonly response: unknown;
+}
+
+interface LegacyWorkflowStateV3 {
+  readonly stateVersion: 3;
+  readonly adapterVersion: "3";
+  readonly schemaVersion: 3;
+  readonly initializedAtMs: number;
+  readonly work: readonly WorkItem[];
+  readonly candidates: readonly unknown[];
+  readonly results: readonly unknown[];
+  readonly counters: { readonly discoveryCalls: 6; readonly coverageCalls: 0; readonly rows: 600 };
+  readonly discoveryPages: readonly unknown[];
+  readonly coveragePages: readonly unknown[];
+}
+
+export interface CacheReprocessingReport {
+  readonly reprocessingVersion: 1;
+  readonly mode: "reprocess-cache";
+  readonly cachePagesReprocessed: number;
+  readonly rowsExamined: number;
+  readonly validRows: number;
+  readonly invalidRows: number;
+  readonly timestampPrecision: {
+    readonly wholeSecond: number;
+    readonly exactMillisecond: number;
+  };
+  readonly qualifyingRows: number;
+  readonly distinctCandidates: number;
+  readonly rejectionCounts: Readonly<Record<DiscoveryValidationReason, number>>;
+  readonly coverageWorkItemsPlanned: number;
+  readonly networkAttempts: 0;
+  readonly newLedgerAttempts: 0;
+  readonly newLedgerSuccesses: 0;
+  readonly newCredits: 0;
+}
+
+interface ReprocessingManifestV4 {
+  readonly manifestVersion: 1;
+  readonly adapterVersion: "4";
+  readonly stateVersion: 4;
+  readonly schemaVersion: 4;
+  readonly sourceStateVersion: 3;
+  readonly sourceCacheVersion: 3;
+  readonly reprocessedAtMs: number;
+  readonly sourceAttemptIds: readonly string[];
+  readonly pages: readonly {
+    readonly sourceFingerprint: string;
+    readonly derivedFingerprint: string;
+    readonly sourceAttemptId: string;
+    readonly page: number;
+  }[];
+  readonly report: CacheReprocessingReport;
 }
 
 function planFromWork(item: WorkItem): PlannedRequest {
@@ -516,6 +628,7 @@ function createWorkflowState(nowMs: number): WorkflowState {
     adapterVersion: ACQUISITION_ADAPTER_VERSION,
     schemaVersion: ACQUISITION_SCHEMA_VERSION,
     initializedAtMs: nowMs,
+    provenance: { kind: "fresh" },
     work: buildDiscoveryPlan(nowMs).map(workFromPlan),
     candidates: [],
     results: [],
@@ -571,6 +684,14 @@ function validateState(value: unknown): value is WorkflowState {
     value.schemaVersion === ACQUISITION_SCHEMA_VERSION &&
     typeof value.initializedAtMs === "number" &&
     Number.isSafeInteger(value.initializedAtMs) &&
+    isRecord(value.provenance) &&
+    (value.provenance.kind === "fresh" ||
+      (value.provenance.kind === "reprocessed-v3-discovery" &&
+        typeof value.provenance.reprocessedAtMs === "number" &&
+        Number.isSafeInteger(value.provenance.reprocessedAtMs) &&
+        value.provenance.sourceStateVersion === 3 &&
+        Array.isArray(value.provenance.sourceAttemptIds) &&
+        value.provenance.sourceAttemptIds.every((attemptId) => typeof attemptId === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(attemptId)))) &&
     Array.isArray(value.work) &&
     value.work.every(isWorkItem) &&
     Array.isArray(value.candidates) &&
@@ -594,6 +715,49 @@ function readState(paths: AcquisitionPaths, nowMs: number): WorkflowState {
   return value;
 }
 
+function readLegacyStateV3(paths: AcquisitionPaths): LegacyWorkflowStateV3 {
+  const value = readPrivateJson(paths.legacyState);
+  if (
+    !isRecord(value) ||
+    value.stateVersion !== 3 ||
+    value.adapterVersion !== "3" ||
+    value.schemaVersion !== 3 ||
+    typeof value.initializedAtMs !== "number" ||
+    !Number.isSafeInteger(value.initializedAtMs) ||
+    !Array.isArray(value.work) ||
+    !value.work.every(isWorkItem) ||
+    value.work.length !== 3 ||
+    value.work.some(
+      (work) =>
+        work.purpose !== "discovery" ||
+        work.candidateId !== null ||
+        work.wallet !== null ||
+        work.cutoffMs !== null ||
+        work.nextPage !== 3 ||
+        work.completedPages.length !== 2 ||
+        work.completedPages[0].page !== 1 ||
+        work.completedPages[1].page !== 2 ||
+        !work.complete ||
+        work.samplingStatus !== "sampled",
+    ) ||
+    !Array.isArray(value.candidates) ||
+    value.candidates.length !== 0 ||
+    !Array.isArray(value.results) ||
+    value.results.length !== 0 ||
+    !isRecord(value.counters) ||
+    value.counters.discoveryCalls !== 6 ||
+    value.counters.coverageCalls !== 0 ||
+    value.counters.rows !== 600 ||
+    !Array.isArray(value.discoveryPages) ||
+    value.discoveryPages.length !== 6 ||
+    !Array.isArray(value.coveragePages) ||
+    value.coveragePages.length !== 0
+  ) {
+    throw new Error("Legacy acquisition state does not match the reviewed six-page provenance");
+  }
+  return value as unknown as LegacyWorkflowStateV3;
+}
+
 function cachePath(paths: AcquisitionPaths, fingerprint: string): string {
   return join(paths.cacheDirectory, `${fingerprint}.json`);
 }
@@ -603,7 +767,7 @@ function readCachedPage(paths: AcquisitionPaths, fingerprint: string): CachedPag
   if (value === null) return null;
   if (
     !isRecord(value) ||
-    value.cacheVersion !== 3 ||
+    value.cacheVersion !== 4 ||
     value.fingerprint !== fingerprint ||
     typeof value.retrievalTimeMs !== "number" ||
     !Number.isSafeInteger(value.retrievalTimeMs) ||
@@ -617,11 +781,53 @@ function readCachedPage(paths: AcquisitionPaths, fingerprint: string): CachedPag
     typeof value.latencyMs !== "number" ||
     !Number.isFinite(value.latencyMs) ||
     value.latencyMs < 0 ||
-    !("response" in value)
+    !Array.isArray(value.sourceTimestampPrecisions) ||
+    !value.sourceTimestampPrecisions.every(
+      (precision) => precision === null || precision === "whole-second" || precision === "exact-millisecond",
+    ) ||
+    !isRecord(value.provenance) ||
+    (value.provenance.kind !== "provider-response" &&
+      !(
+        value.provenance.kind === "reprocessed-v3-cache" &&
+        typeof value.provenance.sourceAttemptId === "string" &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.provenance.sourceAttemptId) &&
+        typeof value.provenance.sourceFingerprint === "string" &&
+        /^[0-9a-f]{64}$/.test(value.provenance.sourceFingerprint) &&
+        value.provenance.sourceCacheVersion === 3
+      )) ||
+    !isRecord(value.response) ||
+    !Array.isArray(value.response.data) ||
+    value.sourceTimestampPrecisions.length !== value.response.data.length
   ) {
     throw new Error("Acquisition cache is malformed or mismatched");
   }
   return value as unknown as CachedPage;
+}
+
+function readLegacyCachedPageV3(path: string, fingerprint: string): LegacyCachedPageV3 {
+  const value = readPrivateJson(path);
+  if (
+    !isRecord(value) ||
+    value.cacheVersion !== 3 ||
+    value.fingerprint !== fingerprint ||
+    typeof value.retrievalTimeMs !== "number" ||
+    !Number.isSafeInteger(value.retrievalTimeMs) ||
+    value.retrievalTimeMs < 0 ||
+    typeof value.requestId !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.requestId) ||
+    (value.reportedCreditCost !== null &&
+      (typeof value.reportedCreditCost !== "number" ||
+        !Number.isFinite(value.reportedCreditCost) ||
+        value.reportedCreditCost < 0 ||
+        Object.is(value.reportedCreditCost, -0))) ||
+    typeof value.latencyMs !== "number" ||
+    !Number.isFinite(value.latencyMs) ||
+    value.latencyMs < 0 ||
+    !("response" in value)
+  ) {
+    throw new Error("Legacy acquisition cache is malformed or mismatched");
+  }
+  return value as unknown as LegacyCachedPageV3;
 }
 
 function loadCompletedPages(paths: AcquisitionPaths, item: WorkItem): ProviderPage[] {
@@ -751,7 +957,7 @@ function aggregateReport(state: WorkflowState, ledger: AcquisitionLedgerSummary)
     }
   }
   return buildSanitizedAcquisitionReport({
-    reportVersion: 3,
+    reportVersion: 4,
     discoveryCalls: ledger.discoveryAttempts,
     coverageCalls: ledger.coverageAttempts,
     rows: state.counters.rows,
@@ -860,6 +1066,336 @@ async function withAcquisitionLock<T>(paths: AcquisitionPaths, now: () => Date, 
       throw releaseError;
     }
   }
+}
+
+const REPROCESS_REJECTION_REASONS: readonly DiscoveryValidationReason[] = [
+  "action-invalid",
+  "duplicate-row",
+  "timestamp-precision-or-value-invalid",
+  "token-address-mismatch",
+  "transaction-hash-invalid",
+  "usd-value-invalid",
+  "wallet-address-invalid",
+];
+
+function buildSanitizedReprocessingReport(input: CacheReprocessingReport): CacheReprocessingReport {
+  const count = (value: number): number => {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("Reprocessing aggregate count is invalid");
+    return value;
+  };
+  return {
+    reprocessingVersion: 1,
+    mode: "reprocess-cache",
+    cachePagesReprocessed: count(input.cachePagesReprocessed),
+    rowsExamined: count(input.rowsExamined),
+    validRows: count(input.validRows),
+    invalidRows: count(input.invalidRows),
+    timestampPrecision: {
+      wholeSecond: count(input.timestampPrecision.wholeSecond),
+      exactMillisecond: count(input.timestampPrecision.exactMillisecond),
+    },
+    qualifyingRows: count(input.qualifyingRows),
+    distinctCandidates: count(input.distinctCandidates),
+    rejectionCounts: Object.fromEntries(
+      REPROCESS_REJECTION_REASONS.map((reason) => [reason, count(input.rejectionCounts[reason] ?? 0)]),
+    ) as Record<DiscoveryValidationReason, number>,
+    coverageWorkItemsPlanned: count(input.coverageWorkItemsPlanned),
+    networkAttempts: 0,
+    newLedgerAttempts: 0,
+    newLedgerSuccesses: 0,
+    newCredits: 0,
+  };
+}
+
+function validateLegacyLedgerForReprocessing(path: string): Map<string, AcquisitionAttempt> {
+  const summary = summarizeAcquisitionLedger(path);
+  if (
+    summary.attempts !== 6 ||
+    summary.discoveryAttempts !== 6 ||
+    summary.coverageAttempts !== 0 ||
+    summary.settled !== 6 ||
+    summary.successful !== 6 ||
+    summary.reportedCreditsUsed !== 6 ||
+    summary.unknownChargeAttempts !== 0 ||
+    summary.retainedCredits !== 6 ||
+    summary.combinedSuccessfulCalls !== 9
+  ) {
+    throw new Error("Acquisition ledger does not match the reviewed six-attempt provenance");
+  }
+  const latest = latestAttempts(readLedger(path));
+  if (
+    latest.some(
+      (attempt) =>
+        attempt.phase !== "settled" ||
+        attempt.purpose !== "discovery" ||
+        attempt.outcome !== "success" ||
+        attempt.reportedCreditCost !== 1 ||
+        attempt.reportedCreditsUsed !== 1 ||
+        attempt.retainedCredits !== 1 ||
+        attempt.failureReason !== null,
+    )
+  ) {
+    throw new Error("Acquisition ledger settlements do not match the reviewed provenance");
+  }
+  return new Map(latest.map((attempt) => [attempt.attemptId, attempt]));
+}
+
+function listPrivateCacheEntries(path: string): Dirent<string>[] {
+  assertSafeExistingPrivateDirectory(path);
+  let entries: Dirent<string>[];
+  try {
+    entries = readdirSync(path, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    throw new Error("Private acquisition cache could not be listed safely");
+  }
+  if (entries.some((entry) => !entry.isFile() || entry.isSymbolicLink() || !/^[0-9a-f]{64}\.json$/.test(entry.name))) {
+    throw new Error("Private acquisition cache contains an unknown or unsafe entry");
+  }
+  return [...entries].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+interface PreparedReprocessing {
+  readonly state: WorkflowState;
+  readonly caches: readonly { readonly fingerprint: string; readonly value: CachedPage }[];
+  readonly manifest: ReprocessingManifestV4;
+  readonly report: CacheReprocessingReport;
+}
+
+function prepareCacheReprocessing(
+  paths: AcquisitionPaths,
+  legacyState: LegacyWorkflowStateV3,
+  ledgerAttempts: ReadonlyMap<string, AcquisitionAttempt>,
+  reprocessedAtMs: number,
+): PreparedReprocessing {
+  if (!Number.isSafeInteger(reprocessedAtMs) || reprocessedAtMs < 0) {
+    throw new Error("Cache reprocessing time is invalid");
+  }
+  const legacyEntries = listPrivateCacheEntries(paths.legacyCacheDirectory);
+  const references = legacyState.work.flatMap((work) => work.completedPages);
+  if (legacyEntries.length !== 6 || references.length !== 6) {
+    throw new Error("Legacy discovery cache does not contain exactly six reviewed pages");
+  }
+  const expectedFiles = new Set(references.map((reference) => `${reference.fingerprint}.json`));
+  if (legacyEntries.some((entry) => !expectedFiles.has(entry.name)) || expectedFiles.size !== 6) {
+    throw new Error("Legacy discovery cache does not match state provenance");
+  }
+
+  const expectedPlans = buildDiscoveryPlan(legacyState.initializedAtMs);
+  const legacyWork = [...legacyState.work].sort((left, right) => left.localFromMs - right.localFromMs);
+  const orderedPlans = [...expectedPlans].sort((left, right) => left.localFromMs - right.localFromMs);
+  let state: WorkflowState = {
+    ...createWorkflowState(legacyState.initializedAtMs),
+    provenance: {
+      kind: "reprocessed-v3-discovery",
+      reprocessedAtMs,
+      sourceStateVersion: 3,
+      sourceAttemptIds: [],
+    },
+  };
+  const caches: Array<{ fingerprint: string; value: CachedPage }> = [];
+  const manifestPages: ReprocessingManifestV4["pages"][number][] = [];
+  const sourceAttemptIds: string[] = [];
+  let wholeSecond = 0;
+  let exactMillisecond = 0;
+
+  for (const [workIndex, oldWork] of legacyWork.entries()) {
+    const basePlan = orderedPlans[workIndex];
+    if (
+      !basePlan ||
+      oldWork.localFromMs !== basePlan.localFromMs ||
+      oldWork.localToMsExclusive !== basePlan.localToMsExclusive ||
+      oldWork.token.address !== basePlan.token.address ||
+      oldWork.workId !== `discovery-${legacyAcquisitionRequestFingerprintV3(basePlan.request, "discovery").slice(0, 24)}`
+    ) {
+      throw new Error("Legacy discovery work does not match the deterministic version-3 plan");
+    }
+
+    for (const reference of [...oldWork.completedPages].sort((left, right) => left.page - right.page)) {
+      const currentWork = state.work.find(
+        (work) =>
+          work.purpose === "discovery" &&
+          work.localFromMs === oldWork.localFromMs &&
+          work.localToMsExclusive === oldWork.localToMsExclusive,
+      );
+      if (!currentWork || currentWork.nextPage !== reference.page) {
+        throw new Error("Version-4 discovery reconstruction is out of sequence");
+      }
+      const request = buildAcquisitionRequest(
+        currentWork.token,
+        currentWork.localFromMs,
+        currentWork.localToMsExclusive,
+        reference.page,
+      );
+      const sourceFingerprint = legacyAcquisitionRequestFingerprintV3(request, "discovery");
+      if (reference.fingerprint !== sourceFingerprint) {
+        throw new Error("Legacy discovery fingerprint does not match version-3 semantics");
+      }
+      const source = readLegacyCachedPageV3(
+        join(paths.legacyCacheDirectory, `${sourceFingerprint}.json`),
+        sourceFingerprint,
+      );
+      if (source.requestId !== reference.requestId) {
+        throw new Error("Legacy cache request identity does not match state provenance");
+      }
+      const ledgerAttempt = ledgerAttempts.get(source.requestId);
+      if (
+        !ledgerAttempt ||
+        ledgerAttempt.requestFingerprint !== sourceFingerprint ||
+        ledgerAttempt.page !== reference.page
+      ) {
+        throw new Error("Legacy cache request identity does not match ledger provenance");
+      }
+      const planned: PlannedRequest = { ...planFromWork(currentWork), request };
+      const parsed = parseProviderPage(source.response, planned, source.requestId, source.retrievalTimeMs);
+      if (parsed.status !== "valid") throw new Error(`Legacy cached page is invalid: ${parsed.reason}`);
+      const precisions = parsed.page.rows.map((row) => normalizeProviderTimestamp(row.block_timestamp)?.sourcePrecision ?? null);
+      wholeSecond += precisions.filter((precision) => precision === "whole-second").length;
+      exactMillisecond += precisions.filter((precision) => precision === "exact-millisecond").length;
+      const derivedFingerprint = parsed.page.requestFingerprint;
+      const derived: CachedPage = {
+        cacheVersion: 4,
+        fingerprint: derivedFingerprint,
+        retrievalTimeMs: source.retrievalTimeMs,
+        requestId: source.requestId,
+        reportedCreditCost: source.reportedCreditCost,
+        latencyMs: source.latencyMs,
+        sourceTimestampPrecisions: precisions,
+        provenance: {
+          kind: "reprocessed-v3-cache",
+          sourceAttemptId: source.requestId,
+          sourceFingerprint,
+          sourceCacheVersion: 3,
+        },
+        response: source.response,
+      };
+      caches.push({ fingerprint: derivedFingerprint, value: derived });
+      manifestPages.push({
+        sourceFingerprint,
+        derivedFingerprint,
+        sourceAttemptId: source.requestId,
+        page: reference.page,
+      });
+      sourceAttemptIds.push(source.requestId);
+      state = updateAfterPage(state, currentWork, parsed.page, paths, true, source.reportedCreditCost, source.latencyMs);
+    }
+  }
+
+  if (state.counters.discoveryCalls !== 6 || state.counters.coverageCalls !== 0 || state.counters.rows !== 600) {
+    throw new Error("Reprocessed discovery state does not preserve the reviewed source counts");
+  }
+  state = {
+    ...state,
+    provenance: {
+      kind: "reprocessed-v3-discovery",
+      reprocessedAtMs,
+      sourceStateVersion: 3,
+      sourceAttemptIds,
+    },
+  };
+  const rejectionCounts = Object.fromEntries(
+    REPROCESS_REJECTION_REASONS.map((reason) => [
+      reason,
+      state.discoveryPages.reduce((sum, page) => sum + (page.validationRejections[reason] ?? 0), 0),
+    ]),
+  ) as Record<DiscoveryValidationReason, number>;
+  const report = buildSanitizedReprocessingReport({
+    reprocessingVersion: 1,
+    mode: "reprocess-cache",
+    cachePagesReprocessed: caches.length,
+    rowsExamined: state.discoveryPages.reduce((sum, page) => sum + page.rowCount, 0),
+    validRows: state.discoveryPages.reduce((sum, page) => sum + page.validRowCount, 0),
+    invalidRows: state.discoveryPages.reduce((sum, page) => sum + page.invalidRowCount, 0),
+    timestampPrecision: { wholeSecond, exactMillisecond },
+    qualifyingRows: state.discoveryPages.reduce((sum, page) => sum + page.qualifyingRows, 0),
+    distinctCandidates: state.candidates.length,
+    rejectionCounts,
+    coverageWorkItemsPlanned: state.work.filter((work) => work.purpose === "coverage").length,
+    networkAttempts: 0,
+    newLedgerAttempts: 0,
+    newLedgerSuccesses: 0,
+    newCredits: 0,
+  });
+  const manifest: ReprocessingManifestV4 = {
+    manifestVersion: 1,
+    adapterVersion: "4",
+    stateVersion: 4,
+    schemaVersion: 4,
+    sourceStateVersion: 3,
+    sourceCacheVersion: 3,
+    reprocessedAtMs,
+    sourceAttemptIds,
+    pages: manifestPages,
+    report,
+  };
+  return { state, caches, manifest, report };
+}
+
+function validateExistingReprocessing(paths: AcquisitionPaths, prepared: PreparedReprocessing, storedManifest: unknown): void {
+  if (JSON.stringify(storedManifest) !== JSON.stringify(prepared.manifest)) {
+    throw new Error("Existing cache-reprocessing manifest does not match source provenance");
+  }
+  const storedState = readPrivateJson(paths.state);
+  if (!validateState(storedState) || JSON.stringify(storedState) !== JSON.stringify(prepared.state)) {
+    throw new Error("Existing reprocessed state is malformed or does not match provenance");
+  }
+  const entries = listPrivateCacheEntries(paths.cacheDirectory);
+  if (entries.length !== prepared.caches.length) throw new Error("Existing reprocessed cache is incomplete");
+  const expectedFiles = new Set(prepared.caches.map((cache) => `${cache.fingerprint}.json`));
+  if (entries.some((entry) => !expectedFiles.has(entry.name))) {
+    throw new Error("Existing reprocessed cache contains unexpected evidence");
+  }
+  for (const cache of prepared.caches) {
+    const stored = readPrivateJson(join(paths.cacheDirectory, `${cache.fingerprint}.json`));
+    if (JSON.stringify(stored) !== JSON.stringify(cache.value)) {
+      throw new Error("Existing reprocessed cache does not match source provenance");
+    }
+  }
+}
+
+async function reprocessLegacyDiscoveryCache(
+  paths: AcquisitionPaths,
+  now: () => Date,
+  durabilityHooks: AcquisitionDurabilityHooks = {},
+): Promise<CacheReprocessingReport> {
+  return withAcquisitionLock(paths, now, async () => {
+    const ledgerAttempts = validateLegacyLedgerForReprocessing(paths.ledger);
+    const legacyState = readLegacyStateV3(paths);
+    const storedManifest = readPrivateJson(paths.reprocessingManifest);
+    let reprocessedAtMs: number;
+    if (storedManifest === null) {
+      if (
+        pathExistsWithoutFollowing(paths.state) ||
+        pathExistsWithoutFollowing(paths.cacheDirectory) ||
+        pathExistsWithoutFollowing(paths.candidateManifest) ||
+        pathExistsWithoutFollowing(paths.aggregateReport)
+      ) {
+        throw new Error("Partial or unexpected version-4 acquisition outputs require manual review");
+      }
+      reprocessedAtMs = now().getTime();
+    } else {
+      if (!isRecord(storedManifest) || !Number.isSafeInteger(storedManifest.reprocessedAtMs)) {
+        throw new Error("Existing cache-reprocessing manifest is malformed");
+      }
+      reprocessedAtMs = storedManifest.reprocessedAtMs as number;
+    }
+
+    const prepared = prepareCacheReprocessing(paths, legacyState, ledgerAttempts, reprocessedAtMs);
+    if (storedManifest !== null) {
+      validateExistingReprocessing(paths, prepared, storedManifest);
+      return prepared.report;
+    }
+
+    for (const cache of prepared.caches) {
+      writePrivateJsonAtomic(
+        join(paths.cacheDirectory, `${cache.fingerprint}.json`),
+        cache.value,
+        durabilityHooks,
+      );
+    }
+    writePrivateJsonAtomic(paths.state, prepared.state, durabilityHooks);
+    writePrivateJsonAtomic(paths.reprocessingManifest, prepared.manifest, durabilityHooks);
+    return prepared.report;
+  });
 }
 
 export interface AcquisitionRunResult {
@@ -1058,12 +1594,16 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
         }
         if (outcome === "success" && parsedPage) {
           const cachedPage: CachedPage = {
-            cacheVersion: 3,
+            cacheVersion: 4,
             fingerprint,
             retrievalTimeMs: parsedPage.retrievalTimeMs,
             requestId: reservation.attemptId,
             reportedCreditCost,
             latencyMs,
+            sourceTimestampPrecisions: parsedPage.rows.map(
+              (row) => normalizeProviderTimestamp(row.block_timestamp)?.sourcePrecision ?? null,
+            ),
+            provenance: { kind: "provider-response" },
             response: JSON.parse(rawBody) as unknown,
           };
           writePrivateJsonAtomic(cachePath(options.paths, fingerprint), cachedPage, options.durabilityHooks);
@@ -1100,7 +1640,7 @@ export async function runLiveAcquisition(options: AcquisitionRunOptions): Promis
     const finalLedger = ledger.summarize();
     const report = aggregateReport(state, finalLedger);
     writePrivateJsonAtomic(options.paths.candidateManifest, {
-      manifestVersion: 3,
+      manifestVersion: 4,
       adapterVersion: ACQUISITION_ADAPTER_VERSION,
       rulesVersion: "4",
       candidates: state.results,
@@ -1127,6 +1667,7 @@ export type AcquisitionCommandResult =
     }
   | { readonly mode: "status"; readonly networkRequestSent: false; readonly ledger: AcquisitionLedgerSummary }
   | CacheDiagnosticReport
+  | CacheReprocessingReport
   | AcquisitionRunResult;
 
 export interface AcquisitionCommandOptions {
@@ -1165,7 +1706,16 @@ export async function runAcquisitionCommand(
   if (command.mode === "status") {
     return { mode: "status", networkRequestSent: false, ledger: summarizeAcquisitionLedger(paths.ledger) };
   }
-  if (command.mode === "diagnose-cache") return diagnoseCanonicalDiscoveryCache(paths);
+  if (command.mode === "diagnose-cache") {
+    return diagnoseCanonicalDiscoveryCache({
+      repositoryRoot: paths.repositoryRoot,
+      state: paths.legacyState,
+      cacheDirectory: paths.legacyCacheDirectory,
+    });
+  }
+  if (command.mode === "reprocess-cache") {
+    return reprocessLegacyDiscoveryCache(paths, options.now ?? (() => new Date()), options.durabilityHooks);
+  }
   assertAcquisitionPrivatePathsIgnored(paths);
   const readKey = options.readKey ?? readAcquisitionApiKey;
   return runLiveAcquisition({
