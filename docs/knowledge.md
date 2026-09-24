@@ -36,19 +36,23 @@ Claude's re-review accepted the original redirect and concurrency fixes but expo
 
 The prepared pagination mode treats the existing successful page-1 ledger entry as a fixed prerequisite and lowers the milestone ceiling to three total attempts. Page 2 can authorize page 3 only within the same locked run after a valid nonterminal response; neither page implies complete coverage. Standard tests now load the outbound-network guard themselves, avoiding reliance on a manually supplied `NODE_OPTIONS` prefix.
 
+The approved pagination command ran once on September 24. Pages 2 and 3 both returned valid three-row envelopes with `is_last_page=false`, two BUY and one SELL row, parseable timestamps ascending within each page, syntactically valid and within-page-distinct Ethereum hashes and trader addresses, matching fixed-token addresses, and numeric nonnegative USD values. The field types matched page 1's observed contract. This expands observed shapes to SELL rows but does not prove that action is token-relative across all swap structures.
+
+Because page 3 also reported `is_last_page=false`, the three-page sample remains incomplete. The summaries do not establish cross-page ordering, stable pagination under concurrent data changes, date-boundary inclusivity, terminal-page behavior, stable leg identity, multi-leg semantics, or complete scoring coverage. The reviewed summary did not expose timestamp minima/maxima, and raw evidence was not inspected for documentation. The closed three-attempt milestone cannot answer these questions; a future acquisition workflow must do so under separate review and authorization.
+
 Private-path hardening remains a fail-closed local control rather than protection from a malicious or mistaken process running as the same user. In particular, Node's path-based final `lstat` then `unlink` leaves a narrow same-user replacement race during lock cleanup. Operators must not alter the private paths while the script runs; hosted acquisition still requires a durable shared coordination mechanism.
 
 ## Nansen questions remaining after the bounded live contract check
 
 - Which verified Ethereum token contracts and historical periods provide sufficient qualifying trades and candidate variety?
-- Does the observed `BUY`/`SELL` field remain token-relative for every swap shape, including multi-leg transactions? The single sample contained only `BUY` rows.
+- Does the observed `BUY`/`SELL` field remain token-relative for every swap shape, including multi-leg transactions? Both actions appeared in the bounded three-page sample, but their general semantics remain unverified.
 - How do date boundaries, sorting, page sizes, pagination termination, and history availability work in actual responses? Can full lookback and answer-window coverage be demonstrated?
 - Which stable fields distinguish duplicate records from distinct swap legs? How should tied timestamps and multi-leg transactions be detected for rejection?
 - How are missing or invalid USD estimates represented, and can their possible effect on the first material action be determined?
-- The success reported one credit cost and one credit used. Are the same headers present and trustworthy on validation failures, transient failures, retries, and credit/plan errors?
+- All three successes reported one credit cost and one credit used. Are the same headers present and trustworthy on validation failures, transient failures, retries, and credit/plan errors?
 - What rate-limit and `Retry-After` behavior is observed? How are timeouts or uncertain charges reconciled with account usage?
 - Does a fresh, complete round fit the proposed four-credit deal cap and ten-second deployed target? Neither is an observed result.
-- Which attempts count toward competition eligibility? The newer Academy article says 100+ calls while the campaign landing page still says 1,000. Reconcile the current rule, the one observed successful call, and submitting-account usage; planned requests and cache hits do not count as observed usage.
+- Which attempts count toward competition eligibility? The newer Academy article says 100+ calls while the campaign landing page still says 1,000. Reconcile the current rule, these three observed successful calls, and submitting-account usage; planned requests and cache hits do not count as observed usage.
 
 ## Public-use and external questions
 

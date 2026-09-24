@@ -48,6 +48,8 @@ After review, the local safety boundary includes an exclusive filesystem lock ar
 
 The prepared pagination probe is a separate mode requiring the exact flags `--live --pagination-probe`. It may start only from the ledger's exact one-attempt historical success state; the original page-1 mode requires an empty ledger and cannot spend continuation slots. Pagination requests page 2 once and page 3 only after a valid nonterminal page 2, with no retries and an unconditional stop after page 3. The historical attempt plus at most two new reservations exhausts the three-attempt ceiling. These pages cannot establish complete scoring coverage, and a separate future acquisition workflow must handle any later pagination.
 
+The approved pagination probe ran once on September 24 and consumed both remaining reservations successfully. Pages 2 and 3 each returned three rows and `is_last_page=false`; the script stopped after page 3. The three-attempt contract-spike milestone is permanently closed. No further contract-spike call is permitted. Future acquisition requires a new reviewed workflow and explicit authorization, with complete-window evidence handled separately from this bounded schema probe.
+
 ## Offline skeleton milestone — September 22, 2026
 
 The authorized first application step is a static App Router landing page only. It explains the future game without rounds, results, or simulated live functionality. No API routes, authentication, database clients, or acquisition scripts are introduced. Plain CSS and system fonts keep the page self-contained; Next.js telemetry is disabled in npm scripts.

@@ -1,8 +1,22 @@
 # Project status
 
-Current milestone: the reviewed local Nansen adapter is prepared offline for an exactly bounded page-2/page-3 pagination probe. The new mode has **not** been run, made zero external calls, and consumed zero credits. Live pagination and all other live work remain unauthorized until the prepared commit is reviewed.
+Current milestone: the independently approved page-2/page-3 Nansen pagination probe has run exactly once and the three-attempt contract-spike milestone is permanently closed. Further acquisition requires a new reviewed and explicitly authorized workflow.
 
-## Offline pagination-probe preparation — September 23, 2026
+## Pagination-probe execution — September 24, 2026
+
+- HEAD was the approved commit `6e4096aab7dc932f1ba5903910ccdcd1609fc4e6` on clean `main`. The origin comparison was 0 behind / 3 ahead before execution.
+- Metadata-only checks confirmed `.env.local` was ignored, untracked, a current-user-owned regular file; its mode was `0644`, so the explicitly permitted repair tightened it to `0600` without reading it. `data/ledgers` was a real current-user-owned `0700` directory and no lock was present.
+- The exact command `npm run nansen:spike -- --live --pagination-probe` was invoked once only. It made two requests with no retries and exited successfully after page 3. It was not rerun.
+- Page 2 returned HTTP 200 in 1,103 ms with three rows, page/per-page 2/3, `is_last_page=false`, two BUY and one SELL observation, and reported cost/use of 1/1 credit.
+- Page 3 returned HTTP 200 in 494 ms with three rows, page/per-page 3/3, `is_last_page=false`, two BUY and one SELL observation, and reported cost/use of 1/1 credit.
+- Both page summaries had valid envelopes, all reviewed fields present, expected string/number types, parseable within-page ascending timestamps, syntactically valid Ethereum addresses and hashes, matching fixed token addresses, numeric nonnegative USD values, and no reported issues or request/schema contradiction. The reviewed summary did not expose sanitized timestamp minima/maxima, so none are recorded.
+- The keyless status command was invoked once and sent no network request. It reported three cumulative attempts, three settlements, three successes, three reported credits used, zero unknown-charge attempts, and three retained credits. The two new attempts added two successes and two reported credits; the historical page-1 attempt remains separately recorded as one success and one reported credit.
+- Neither new page reached `is_last_page=true`; page 3 still reported `false`. This is incomplete contract evidence and cannot establish complete query, lookback, answer-window, or No trade coverage. No current account balance is inferred.
+- The approved milestone is exhausted and permanently closed. Raw responses and ledger evidence remain private and ignored. Further calls require a separately reviewed and authorized acquisition workflow.
+- Claude's approval of the named preparation commit is recorded in `docs/reviews/6e4096a.md`; the supplied authorization did not include a verbatim review body or reviewer metadata, so those details are not inferred.
+- **Codex verification after documentation:** `npm test` passed 80/80 with the automatic network guard, `npm run lint` passed with zero warnings, `npm run typecheck` passed, and `git diff --check` passed. Credential-pattern and tracked-private-data scans passed; metadata confirmed the protected paths remain ignored/untracked, the lock is absent, `.env.local` remains `0600`, and `data/ledgers` remains `0700`. No production build was run.
+
+## Offline pagination-probe preparation history — September 23, 2026
 
 - Claude's re-review of `a0a5363` accepted the two original blockers: redirect rejection and exclusive cross-process locking. The task materials also identified one definite test defect: the redirect assertion ran inside the injected fetch callback, where the runner's expected catch could swallow it. The available materials did not include the verbatim re-review body, model/effort, or a list of Claude-executed commands, so none are inferred in `docs/reviews/a0a5363.md`.
 - The redirect regression now captures the received option inside injected fetch and asserts `redirect === "error"` only after the runner finishes. A guarded mutation check that removed the production option made this test fail; the option was then restored.
@@ -78,7 +92,7 @@ The version 1 correction history remains in `docs/reviews/db2f0b1.md`. Version 2
 
 ## Next proposed step
 
-Have an independent reviewer inspect the offline pagination-preparation commit, especially the exact ledger precondition, three-attempt ceiling, page branching, disabled retries, genuine redirect regression, credential/path handling, and automatic network guard. Only after that review and separate explicit authorization should the pagination command be considered. The application remains offline and no five-round acquisition has started.
+Design a separate bounded acquisition workflow for reviewed real-round candidates, including complete pagination evidence, stable leg identity, direction validation, resumability, and its own reviewed spending authorization. The closed contract-spike script must not be extended or rerun. The application remains offline and no five-round acquisition has started.
 
 ## Accepted offline skeleton history
 

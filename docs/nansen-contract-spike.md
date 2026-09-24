@@ -16,13 +16,37 @@ This document records a narrow authenticated probe of `POST /api/v1/tgm/dex-trad
 
 Normal `npm test`, lint, type checking, application development, and builds do not invoke the live command or send Nansen requests. The standard `npm test` script automatically preloads `test/offline-network-guard.mjs`; a sanity test requires dummy fetch and raw-socket calls to be blocked. Runner tests inject in-memory fetch implementations.
 
-## Prepared pagination probe — not executed
+## Pagination probe preparation
 
 Pagination mode acquires the same exclusive lock before inspecting accounting. It refuses to reserve or fetch unless the private ledger contains exactly one reservation and matching settlement for the fixed page-1 request, with HTTP 200, successful outcome, reported cost and use of one credit, no unknown charge, and one retained credit. The original page-1 live mode now requires an empty ledger, so it cannot consume the two continuation slots after the historical success.
 
 From that exact state it requests page 2 once. Any redirect, timeout, 429, 5xx, authentication/plan/credit response, malformed or mismatched pagination, raw-write failure, or pricing mismatch stops after that attempt. A valid page 2 with `is_last_page=true` also stops. Only a valid page 2 with `is_last_page=false` permits one page-3 request, after which the script stops regardless of the page-3 pagination flag. Pages 2 and 3 remain contract evidence only: they never establish complete lookback or answer-window coverage.
 
-This pagination mode has been prepared and offline-tested but **has not been run**. Its implementation commit made zero Nansen or other external calls and consumed zero credits. Live execution remains unauthorized pending review of the prepared code. Any calls beyond the three-attempt milestone belong to a separate future acquisition workflow with its own authorization and controls.
+The preparation commit made zero Nansen or other external calls and consumed zero credits. Claude's approval of the prepared commit is recorded in `docs/reviews/6e4096a.md` with the limits of the supplied evidence.
+
+## Pagination execution — September 24, 2026
+
+The exact approved command was invoked once. It made two new attempts with no retries and stopped after page 3 as designed.
+
+| Evidence | Page 2 | Page 3 |
+| --- | ---: | ---: |
+| Outcome | success | success |
+| HTTP status | 200 | 200 |
+| Script-measured latency | 1,103 ms | 494 ms |
+| `X-Nansen-Credits-Cost` | 1 | 1 |
+| `X-Nansen-Credits-Used` | 1 | 1 |
+| Rows | 3 | 3 |
+| Returned page / per-page | 2 / 3 | 3 / 3 |
+| `is_last_page` | false | false |
+| BUY / SELL / other | 2 / 1 / 0 | 2 / 1 / 0 |
+
+Both envelopes were structurally valid with no reported summary issues or request/schema contradiction. Every reviewed field was present in all three rows on each page. Timestamps, transaction hashes, trader addresses, action, token addresses/names, and counter-token addresses/names were strings. Token amounts, counter-token amounts, estimated swap prices, and estimated USD values were numbers. All timestamps were parseable and ascending within their returned page. All three transaction hashes and trader addresses on each page matched Ethereum syntax and were distinct within that page; all token addresses matched Ethereum syntax and the fixed WETH probe token after normalization. All six estimated USD values were finite nonnegative numbers, with no null, other-type, negative, or signed-zero observations.
+
+The reviewed summary did not expose minimum or maximum timestamps, so none are recorded. Exact timestamps and all private values remain only in ignored raw evidence.
+
+The two new attempts produced two successes and reported two credits cost and two credits used. Combined with the historical page-1 call, sanitized status reported three attempts, three settlements, three successes, three reported credits used, zero unknown-charge attempts, and three retained credits. The three observed cost headers also sum to three. No current account balance was queried or inferred.
+
+Neither page 2 nor page 3 reported `is_last_page=true`. Page 3 explicitly reported more pagination while the reviewed script stopped at its milestone boundary. These pages do not prove complete query, 30-day lookback, or 48-hour answer-window coverage. The three-attempt contract-spike milestone is permanently closed. Further provider acquisition requires a new reviewed and explicitly authorized workflow.
 
 ### Crash-left lock recovery
 
@@ -73,11 +97,11 @@ This proves only the observed shape of one page. The tracked summary intentional
 
 ## What remains unknown
 
-- `is_last_page=false` proves that this one-page sample is incomplete. No claim of full lookback, answer-window, or No trade coverage is possible.
+- `is_last_page=false` on all three observed pages proves that the bounded sample is still incomplete. No claim of full query, lookback, answer-window, or No trade coverage is possible.
 - The response has no explicit transaction-leg or event ID. A stable per-leg identifier across pages, retries, corrections, and repeated retrievals remains unresolved. A transaction hash alone cannot safely merge distinct legs.
-- Three `BUY` rows do not prove that `action` is token-relative for every swap shape. No `SELL`, multi-leg, tied-time, duplicate, corrected, missing-value, empty-page, or terminal-page case was observed.
+- `BUY` and `SELL` rows were observed, but they do not prove that `action` is token-relative for every swap shape. No verified multi-leg, tied-time, duplicate, corrected, missing-value, empty-page, or terminal-page case was observed.
 - Timestamp precision and within-timestamp ordering, request-boundary inclusivity, pagination stability, maximum historical coverage, and empty terminal behavior remain unverified.
-- The sample shows numeric `estimated_value_usd`; it does not establish whether that field is always populated or is the correct threshold value for every swap form.
+- All nine sampled rows show numeric `estimated_value_usd`; this does not establish whether that field is always populated or is the correct threshold value for every swap form.
 - Retry, rate-limit, authentication-error, plan-error, insufficient-credit, failed-request charging, and missing-credit-header behavior were covered only by offline control tests, not live responses.
 - Redistribution terms and public fixture review remain separate release checks. Raw labels and wallet identities remain private.
 
@@ -87,4 +111,4 @@ The pure scoring rules remain unchanged and provisional at their provider bounda
 
 Claude's review of `fa1249f` found redirect forwarding and concurrent reservation blockers and identified missing loop tests. The correction adds redirect rejection, an exclusive run lock, canonical paths, isolated key parsing, no-follow private-file operations, response-header-first accounting, and direct runner regressions. The full review and disposition are recorded in `docs/reviews/fa1249f.md`.
 
-This correction made **zero Nansen or other external calls** and consumed **zero credits**. It preserves the earlier one-attempt/one-credit evidence and the manually reported 1,095-credit pre-spike balance without inferring a current balance. Claude's re-review accepted the two original blockers but found that the redirect regression asserted inside a callback whose error the runner intentionally catches. The prepared pagination change moves that assertion outside the callback and adds the bounded behavior above. Further pagination remains unauthorized pending review of the new commit.
+This correction made **zero Nansen or other external calls** and consumed **zero credits**. It preserved the earlier one-attempt/one-credit evidence and the manually reported 1,095-credit pre-spike balance without inferring a current balance. Claude's re-review accepted the two original blockers but found that the redirect regression asserted inside a callback whose error the runner intentionally catches. The pagination preparation moved that assertion outside the callback and added the bounded behavior above. The later approved execution is recorded separately and does not change the correction commit's offline evidence.
