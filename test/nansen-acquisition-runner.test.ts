@@ -89,6 +89,7 @@ function providerRow(wallet: string, timestamp: string, transactionSeed: string)
 test("argument parsing requires explicit bounded live flags and rejects contradictions", () => {
   assert.deepEqual(parseAcquisitionArguments([]), { mode: "dry-run" });
   assert.deepEqual(parseAcquisitionArguments(["--status"]), { mode: "status" });
+  assert.deepEqual(parseAcquisitionArguments(["--diagnose-cache"]), { mode: "diagnose-cache" });
   assert.deepEqual(
     parseAcquisitionArguments(["--live", "--max-new-calls", "10", "--target-total-success", "120"]),
     { mode: "live", maxNewCalls: 10, targetTotalSuccess: 120 },
@@ -106,6 +107,8 @@ test("argument parsing requires explicit bounded live flags and rejects contradi
     ["--live", "--max-new-calls", "131", "--target-total-success", "120"],
     ["--live", "--max-new-calls", "10", "--target-total-success", "1000"],
     ["--status", "--status"],
+    ["--diagnose-cache", "--live"],
+    ["--diagnose-cache", "--max-new-calls", "1"],
     ["--unknown"],
   ]) {
     assert.throws(() => parseAcquisitionArguments(arguments_), /Unsupported|must/);
@@ -890,7 +893,7 @@ test("application and public game modules cannot import acquisition or private m
   for (const root of roots) visit(root);
   for (const file of sourceFiles) {
     const source = readFileSync(file, "utf8");
-    assert.doesNotMatch(source, /nansen-acquisition|data\/private|data\/ledgers/);
+    assert.doesNotMatch(source, /nansen-(?:acquisition|cache-diagnostic)|data\/private|data\/ledgers/);
   }
 });
 

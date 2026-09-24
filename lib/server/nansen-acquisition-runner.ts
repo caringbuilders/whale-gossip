@@ -43,6 +43,10 @@ import {
   type SanitizedAcquisitionReport,
 } from "./nansen-acquisition";
 import {
+  diagnoseCanonicalDiscoveryCache,
+  type CacheDiagnosticReport,
+} from "./nansen-cache-diagnostic";
+import {
   acquireContractSpikeLock,
   ensurePrivateDirectory,
   parseNonnegativeHeader,
@@ -90,11 +94,13 @@ export function resolveAcquisitionPaths(repositoryRoot = ACQUISITION_REPOSITORY_
 export type AcquisitionCommand =
   | { readonly mode: "dry-run" }
   | { readonly mode: "status" }
+  | { readonly mode: "diagnose-cache" }
   | { readonly mode: "live"; readonly maxNewCalls: number; readonly targetTotalSuccess: 120 };
 
 export function parseAcquisitionArguments(arguments_: readonly string[]): AcquisitionCommand {
   if (arguments_.length === 0) return { mode: "dry-run" };
   if (arguments_.length === 1 && arguments_[0] === "--status") return { mode: "status" };
+  if (arguments_.length === 1 && arguments_[0] === "--diagnose-cache") return { mode: "diagnose-cache" };
   if (
     arguments_.length === 5 &&
     arguments_[0] === "--live" &&
@@ -114,7 +120,7 @@ export function parseAcquisitionArguments(arguments_: readonly string[]): Acquis
     };
   }
   throw new Error(
-    "Unsupported arguments; use no arguments, --status, or --live --max-new-calls N --target-total-success 120",
+    "Unsupported arguments; use no arguments, --status, --diagnose-cache, or --live --max-new-calls N --target-total-success 120",
   );
 }
 
@@ -1120,6 +1126,7 @@ export type AcquisitionCommandResult =
       };
     }
   | { readonly mode: "status"; readonly networkRequestSent: false; readonly ledger: AcquisitionLedgerSummary }
+  | CacheDiagnosticReport
   | AcquisitionRunResult;
 
 export interface AcquisitionCommandOptions {
@@ -1158,6 +1165,7 @@ export async function runAcquisitionCommand(
   if (command.mode === "status") {
     return { mode: "status", networkRequestSent: false, ledger: summarizeAcquisitionLedger(paths.ledger) };
   }
+  if (command.mode === "diagnose-cache") return diagnoseCanonicalDiscoveryCache(paths);
   assertAcquisitionPrivatePathsIgnored(paths);
   const readKey = options.readKey ?? readAcquisitionApiKey;
   return runLiveAcquisition({
