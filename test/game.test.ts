@@ -351,3 +351,15 @@ test("client components cannot import the private fixture module", () => {
   const serverModule = readFileSync(new URL("../lib/server/synthetic-rounds.ts", import.meta.url), "utf8");
   assert.match(serverModule, /import "server-only";/);
 });
+
+test("homepage explains the synthetic token-specific game objective", () => {
+  const homeSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(homeSource, /<section className="game-explainer" aria-labelledby="how-to-play-title">/);
+  assert.match(homeSource, /Read five synthetic pre-cutoff trades from a pseudonymous large-trade wallet\./);
+  assert.match(homeSource, /first material \(\$2\.5k\+\) trade in the same featured token during the next 48 hours/);
+  assert.match(homeSource, /Buy, Sell, or No trade/);
+  assert.match(homeSource, /one point for each correct call/);
+  assert.match(homeSource, /activity in that token only—not its other assets or the token’s subsequent market price/);
+  assert.match(homeSource, /fictional identifiers used in this deterministic demo—not real identities, Nansen labels, or live market data/);
+});

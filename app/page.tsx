@@ -21,6 +21,22 @@ export default function Home() {
         <p className="hero-note"><strong>Explicitly synthetic data.</strong> Five deterministic Ethereum rounds. No live wallet data, network retrieval, or investment advice.</p>
       </section>
 
+      <section className="game-explainer" aria-labelledby="how-to-play-title">
+        <div className="explainer-item">
+          <p className="eyebrow">Game guide</p>
+          <h2 id="how-to-play-title">How to play</h2>
+          <p>Read five synthetic pre-cutoff trades from a pseudonymous large-trade wallet. Predict its first material ($2.5k+) trade in the same featured token during the next 48 hours: Buy, Sell, or No trade. Play five rounds and earn one point for each correct call.</p>
+        </div>
+        <div className="explainer-item">
+          <h3>What does each round cover?</h3>
+          <p>Each round focuses on one fictional token on Ethereum. The displayed tape and hidden answer concern that wallet’s activity in that token only—not its other assets or the token’s subsequent market price.</p>
+        </div>
+        <div className="explainer-item">
+          <h3>Who are the whales and tokens?</h3>
+          <p>Names such as “Harbor Whale” and “TIDE” are fictional identifiers used in this deterministic demo—not real identities, Nansen labels, or live market data.</p>
+        </div>
+      </section>
+
       <Game questions={questions} />
 
       <aside className="boundary-note" aria-labelledby="boundary-title">

@@ -30,6 +30,14 @@ main { width: min(1160px, calc(100% - 48px)); margin: auto; }
 .period { color: #6f8d3f; }
 .tagline { margin: 0; font-size: clamp(1.15rem, 2.5vw, 1.65rem); letter-spacing: -.025em; }
 .hero-note { margin: 0 0 7px; color: var(--muted); }
+.game-explainer { display: grid; grid-template-columns: 1.2fr 1fr 1fr; margin: 0 0 34px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.explainer-item { padding: 22px 24px 24px; }
+.explainer-item:first-child { padding-left: 0; }
+.explainer-item:last-child { padding-right: 0; }
+.explainer-item + .explainer-item { border-left: 1px solid var(--line); }
+.explainer-item .eyebrow { margin: 0 0 7px; }
+.explainer-item h2, .explainer-item h3 { margin: 0 0 8px; color: var(--ink); font-size: 1.05rem; line-height: 1.25; letter-spacing: -.02em; }
+.explainer-item p:last-child { margin: 0; color: var(--muted); font-size: .88rem; line-height: 1.5; }
 
 .game-card, .results-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: clamp(24px, 5vw, 56px); }
 .round-meta, .question-heading, .tape-heading { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
@@ -101,6 +109,9 @@ main { width: min(1160px, calc(100% - 48px)); margin: auto; }
 @media (max-width: 780px) {
   main { width: min(100% - 32px, 1160px); }
   .hero { grid-template-columns: 1fr; gap: 20px; padding-top: 32px; }
+  .game-explainer { grid-template-columns: 1fr; }
+  .explainer-item, .explainer-item:first-child, .explainer-item:last-child { padding: 18px 0; }
+  .explainer-item + .explainer-item { border-top: 1px solid var(--line); border-left: 0; }
   .game-card { padding: 22px; }
   .question-heading { align-items: flex-end; }
   .guess-panel { display: block; }
