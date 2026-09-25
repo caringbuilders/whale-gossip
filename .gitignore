@@ -30,3 +30,5 @@ logs/
 
 # Windows download metadata
 *:Zone.Identifier
+.vercel
+.env*
