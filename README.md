@@ -4,6 +4,8 @@ Whale Gossip is a playable five-round Ethereum prediction game. Each round shows
 
 The current public deck uses **explicitly synthetic, deterministic fixtures**. It does not display live wallet data or claim that a real historical round was completed. The interface and reveal flow are playable without an API key.
 
+**Live demo:** [whale-gossip.vercel.app](https://whale-gossip.vercel.app) — an explicitly synthetic, offline game. It does not use or publish live Nansen data.
+
 ## Nansen integration evidence
 
 The private Nansen integration successfully logged **100 total API calls**: three bounded contract-spike calls and 97 acquisition calls. The acquisition calls consisted of six discovery calls and 91 candidate-specific coverage calls.
@@ -40,11 +42,11 @@ This boundary supports a keyless demonstration. It is not authentication or an a
 
 The repository also contains server-only acquisition tooling used for bounded, reviewed data preparation. It is separate from public gameplay, requires explicit authorization for any live request, and must never expose credentials, wallet identities, raw responses, or exact private evidence. Acquisition is currently frozen at 100 combined successful calls. No further live call is authorized by this checkpoint.
 
-## Public policies and release prerequisites
+## Public policies and submission prerequisites
 
-The current offline release includes Terms of Use at `/terms` and a Privacy Notice at `/privacy`, both effective September 24, 2026. Revisit them before adding accounts, analytics, persistence, production live mode, or other collection.
+The current production release includes Terms of Use at `/terms` and a Privacy Notice at `/privacy`, both effective September 24, 2026. Revisit them before adding accounts, analytics, persistence, production live mode, or other collection.
 
-Before deployment, complete the checks in `docs/submission-checklist.md`, including browser verification, the final secret/private-data scan, repository visibility confirmation, and the required recording and submission steps.
+The remaining submission work is tracked in `docs/submission-checklist.md`, including the final secret/private-data scan, required recording, X post, and official entry form.
 
 ## Checks
 

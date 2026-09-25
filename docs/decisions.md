@@ -58,6 +58,10 @@ Codex implements small milestones; Claude independently reviews a named commit/d
 
 The proposal targets ten real reviewed rounds and one complete live flow first, then deck expansion and hardening. Its internal submission target is September 26, 2026 at 23:59 America/New_York. Its 1,050-call plan was based on the then-published 1,000-call requirement and remains historical context. On September 23, the newer official Academy article said 100+ calls, while the campaign landing page still displayed 1,000. Reconcile the current requirement and submitting-account usage before submission. Do not generate wasteful calls to inflate counts.
 
+## Production deployment — September 24, 2026
+
+Keep GitHub automatic deployment disconnected so repository pushes cannot bypass independent review and preview verification. The verified release process tested a preview first. Because that preview was not a production-environment deployment, `vercel promote` created a new production-environment build from the same reviewed source commit instead of directly promoting the preview. Future production checkpoints must record and verify the deployed source commit. The current production application remains the synthetic offline game; deployment does not authorize or imply production Nansen retrieval.
+
 ## Bounded contract spike — September 23, 2026
 
 The local spike is a server/local-only script and support module, not application integration. It defaults to dry-run, hard-allows one endpoint, uses fixed bounded requests, reserves each attempt durably before send, and now permits no more than three total attempts or three retained credits for this contract milestone. Raw responses and the ledger remain in ignored private paths. Normal tests and application commands make no provider request; `npm test` automatically preloads the outbound-network guard.

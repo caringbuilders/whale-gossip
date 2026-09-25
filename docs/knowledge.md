@@ -112,7 +112,7 @@ Private acquisition artifacts belong under ignored `data/` paths (for example `d
 
 Node 24.21.0 and npm 11.19.0 were rechecked for the skeleton. No environment file or credential is needed. `.env.example` contains comments only. `npm run dev` serves loopback at http://localhost:3000; `npm run build` and `npm start` provide a local production check. Package installation requires network access; application source has no external data retrieval code.
 
-No `agent-browser` executable, connected browser tool, Chromium/Firefox executable at standard checked paths, or default Playwright browser cache was found. Visual verification remains pending.
+Earlier local checks found no `agent-browser` executable, connected browser tool, Chromium/Firefox executable at standard checked paths, or default Playwright browser cache. Production browser verification was later completed through the deployment workflow recorded in `docs/status.md`; this does not establish that local browser tooling became available.
 
 Installed versions: Next.js 16.3.6, React/React DOM 19.3.0, TypeScript 6.0.3, ESLint 9.39.5. ESLint 9 is deprecated but currently matches bundled lint-plugin peer requirements; TypeScript 7 is unsupported by the installed lint tooling. The production build required execution outside the sandbox for Next.js to capture its TypeScript subprocess output. Standalone type checking passed inside the sandbox. npm reported an unapproved `unrs-resolver` postinstall script; no approval was needed for the checks that passed.
 
