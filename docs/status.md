@@ -1,6 +1,15 @@
 # Project status
 
-Current milestone: source commit `86f366ee4cd9907f087ed8faa9cb1594d8ac5c28` is deployed at [whale-gossip.vercel.app](https://whale-gossip.vercel.app). The public five-round game remains explicitly synthetic and offline. Acquisition is frozen at exactly 100 combined successful calls; coverage page 91 remained nonterminal, so no real round compiled or was published.
+Current milestone: source commit `86f366ee4cd9907f087ed8faa9cb1594d8ac5c28` is deployed at [whale-gossip.vercel.app](https://whale-gossip.vercel.app). The public five-round game remains explicitly synthetic and offline. Final evidence records 101 successful Nansen calls: three historical contract-spike calls plus 98 acquisition calls, comprising six discovery and 92 coverage calls. Coverage page 92 remained nonterminal, so no real round compiled or was published. No further Nansen call is planned.
+
+## Final live-recording evidence — September 25, 2026
+
+- The acquisition ledger reports 98 attempts, 98 settled attempts, 98 successes, 98 reported credits, 98 retained credits, zero unknown-charge attempts, zero `invalid-coverage-row` failures, and zero `wallet-filter-not-applied` failures. Adding the three historical contract-spike successes gives 101 combined successful calls.
+- Exactly one additional user-authorized live call was made for the submission recording, bounded by `--max-new-calls 1`. It requested coverage page 92. The allowlisted summary reported `rowCount: 100`, `walletMatchCount: 100`, `tokenMatchCount: 100`, `structurallyValidRowCount: 100`, `structurallyInvalidRowCount: 0`, `rejectionReason: null`, `timeSpanBand: 1-to-6-hours`, `page: 92`, `perPage: 100`, `isLastPage: false`, `reportedCreditCost: 1`, `latencyBand: 1-to-3-seconds`, and `stoppedBecause: per-run-limit`.
+- Page 92 remained nonterminal. Coverage therefore remained incomplete, the candidate remained unscorable, and no real Nansen-derived round was published. The recording was captured successfully and shows the privacy-safe live acquisition summary followed by the explicitly synthetic public game. It does not show or imply that the public game serves live Nansen data.
+- The prior manual dashboard reading was 995 credits. The post-call manual reading was 1,004 credits, a net increase of nine that does not reconcile with the one-credit call. The 1,004 reading is an unexplained manual observation; it is not used to infer a grant, reconstruct account-balance history, alter the ledger, or claim dashboard reconciliation. The earlier `1,092 − 97 = 995` reconciliation for the preceding acquisition calls remains valid.
+- Official sources conflict. The [campaign landing page](https://nansen.ai/campaigns/meridian-buildathon) still says “Make 1,000 API calls.” The newer, detailed [Nansen Academy FAQ](https://academy.nansen.ai/articles/3540155-nansen-meridian-buildathon-sep-14-27), shown as updated one day before this checkpoint, says “Log 100+ API calls between Sep 14th–27th.” The project proceeds with 101 successful calls under the newer, detailed FAQ; only Nansen can definitively reconcile the discrepancy.
+- The FAQ also requires a public GitHub repository, an X post tagging `@nansen_ai` with the GitHub link, a 30–60 second recording showing the build running with live Nansen data visible, official Typeform submission, and submission by September 27 at 23:59 UTC. The privacy-safe recording is captured; final playback/duration confirmation, the X post, and the official submission remain pending.
 
 ## Production deployment — September 24, 2026
 
@@ -12,6 +21,8 @@ Current milestone: source commit `86f366ee4cd9907f087ed8faa9cb1594d8ac5c28` is d
 - GitHub automatic deployment remains intentionally disconnected so a push cannot bypass independent review and preview verification. The supplied predeployment review is recorded in `docs/reviews/86f366e.md`.
 
 ## Acquisition freeze and submission preparation — September 24, 2026
+
+This section preserves the point-in-time state before the separately authorized one-call recording run on September 25. The final totals are recorded above.
 
 - The supplied aggregate record contains 97 acquisition attempts, 97 settled successes, 97 reported credits, 97 retained credits, zero unknown-charge attempts, and zero failure reasons. Together with three closed contract-spike successes, combined successful calls equal exactly 100.
 - Each coverage call requested a new sequential page required for the proposed 32-day candidate window; requests were not identical repeats. Early pages established consistent wallet-filter enforcement and extremely dense activity. Once completion appeared unlikely within the available budget, the user separately authorized continued sequential coverage to the chosen Academy 100-call stop condition. Later pages continued wallet/token consistency and density evidence but added limited diversity; they are not represented as equally necessary or uniquely informative.
@@ -25,6 +36,8 @@ Current milestone: source commit `86f366ee4cd9907f087ed8faa9cb1594d8ac5c28` is d
 - **Codex verification for this checkpoint:** `npm test` passed 163/163 under the automatic outbound-network guard; `npm run lint`, `npm run typecheck`, and `git diff --check` passed. Credential-pattern, tracked-private-data, private-identifier, and client/server dependency-boundary scans found no matches. `package.json` and `package-lock.json` are unchanged. This documentation task made zero Nansen or other external application calls, consumed zero credits, and did not access credentials or private acquisition artifacts.
 
 ## Offline acquisition workflow — September 24, 2026
+
+This section preserves the workflow and evidence state recorded on September 24. The final one-call recording evidence and current totals are recorded above.
 
 - Added `lib/server/nansen-acquisition.ts`, `lib/server/nansen-acquisition-runner.ts`, and `scripts/nansen-acquisition.ts`. Application/client modules cannot import them, and importing the CLI has no side effects.
 - The exact allowlist contains only `POST https://api.nansen.ai/api/v1/tgm/dex-trades`, Ethereum, `only_smart_money=false`, redirect rejection, an abort timeout, and server-owned request parameters. Arbitrary endpoints, tokens, wallets, dates, bodies, and target totals are not CLI inputs.
@@ -140,7 +153,7 @@ At the synthetic-game milestone, real acquired rounds, provider normalization an
 - The response included string `trader_address_label` values despite using no label filters. They remain private and must be discarded by future public or fixture serialization.
 - Raw response and accounting evidence are stored only in ignored `data/private/` and `data/ledgers/` paths. They are not Git candidates.
 - The user reported a pre-task balance of **1,095 credits**. This is manual evidence, not API-derived. No post-task balance was queried, and no explanation is inferred for the five-credit difference from 1,100.
-- Current official sources disagree on eligibility call count: the Academy article updated September 23 says **100+ calls**, while the campaign landing page still says 1,000. The proposal retains the earlier 1,000-call basis as historical planning context. Do not manufacture calls; reconcile the current rule and account usage before submission.
+- At that checkpoint, official sources already disagreed on eligibility call count: the Academy article said **100+ calls**, while the campaign landing page said 1,000. The proposal retains the earlier 1,000-call basis as historical planning context. Final retrieval context, source links, and the 101-call submission decision are recorded at the top of this document.
 
 Detailed evidence and remaining contract questions are in `docs/nansen-contract-spike.md`.
 

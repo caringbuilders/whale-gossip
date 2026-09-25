@@ -8,6 +8,8 @@
 **Submission target:** Saturday September 26, 2026, by 23:59 America/New_York  
 **Status:** Implementation proposal. This revision does not represent a completed build or authenticated API validation.
 
+**Dated correction — September 25, 2026:** The original proposal below preserves its planning assumption based on the [campaign landing page](https://nansen.ai/campaigns/meridian-buildathon), which still says “Make 1,000 API calls.” The newer, detailed [Nansen Academy FAQ](https://academy.nansen.ai/articles/3540155-nansen-meridian-buildathon-sep-14-27), shown as updated one day before this correction, says “Log 100+ API calls between Sep 14th–27th.” These official sources conflict. Whale Gossip has logged 101 successful calls and proceeds under the newer, detailed FAQ; only Nansen can definitively reconcile the discrepancy. The FAQ also requires a public GitHub repository, an X post tagging `@nansen_ai` with the GitHub link, a 30–60 second recording showing the build running with live Nansen data visible, official Typeform submission, and submission by September 27 at 23:59 UTC.
+
 ## 1. Recommendation and scope
 
 Proceed with Whale Gossip as a small, time-limited build before the 0600 migration. It is a useful first exercise of the Windows → GitHub → Vercel/Supabase workflow: API integration, a private data store, a responsive interface, bounded spending, a reviewed deployment, and documentation.

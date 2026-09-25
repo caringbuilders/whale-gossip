@@ -8,11 +8,11 @@ The current public deck uses **explicitly synthetic, deterministic fixtures**. I
 
 ## Nansen integration evidence
 
-The private Nansen integration successfully logged **100 total API calls**: three bounded contract-spike calls and 97 acquisition calls. The acquisition calls consisted of six discovery calls and 91 candidate-specific coverage calls.
+The private Nansen integration successfully logged **101 total API calls**: three bounded contract-spike calls and 98 acquisition calls. The acquisition calls consisted of six discovery calls and 92 candidate-specific coverage calls.
 
-One wallet-filtered candidate reached coverage page 91. Each call requested the next sequential page required for its proposed 32-day window; the requests were not identical repeats. Early pages established consistent wallet-filter enforcement and extremely dense activity. Once completion appeared unlikely within the available budget, the user separately authorized continuing sequential coverage to the chosen Academy 100-call stop condition. Later pages continued to show wallet/token consistency and extreme density, but added limited diversity beyond that evidence. Page 91 was still nonterminal, so the candidate remained unscorable and no real round was published. API-call count alone does not prove a complete or publishable round.
+One wallet-filtered candidate reached coverage page 92. Each call requested the next sequential page required for its proposed 32-day window; the requests were not identical repeats. Early pages established consistent wallet-filter enforcement and extremely dense activity. Once completion appeared unlikely within the available budget, the user separately authorized continuing sequential coverage to the chosen Academy 100-call stop condition. One additional, explicitly authorized call requested page 92 for the privacy-safe submission recording. Page 92 was still nonterminal, so the candidate remained unscorable and no real round was published. API-call count alone does not prove a complete or publishable round.
 
-The current Nansen Academy page says **100+ calls**, while an older campaign page says **1,000 calls**. That discrepancy remains unresolved and should be reconciled with the organizer.
+Official sources conflict: the [campaign landing page](https://nansen.ai/campaigns/meridian-buildathon) still says “Make 1,000 API calls,” while the newer, detailed [Nansen Academy FAQ](https://academy.nansen.ai/articles/3540155-nansen-meridian-buildathon-sep-14-27), shown as updated one day before the final evidence checkpoint, says “Log 100+ API calls between Sep 14th–27th.” The project proceeds with 101 successful calls under the newer FAQ; only Nansen can definitively reconcile the discrepancy.
 
 **Powered by Nansen API.** The playable deck itself uses synthetic data, not Nansen data. Counts-only integration evidence is recorded in `docs/nansen-usage-summary.md`.
 
@@ -40,7 +40,7 @@ This boundary supports a keyless demonstration. It is not authentication or an a
 
 ## Optional private acquisition tooling
 
-The repository also contains server-only acquisition tooling used for bounded, reviewed data preparation. It is separate from public gameplay, requires explicit authorization for any live request, and must never expose credentials, wallet identities, raw responses, or exact private evidence. Acquisition is currently frozen at 100 combined successful calls. No further live call is authorized by this checkpoint.
+The repository also contains server-only acquisition tooling used for bounded, reviewed data preparation. It is separate from public gameplay, requires explicit authorization for any live request, and must never expose credentials, wallet identities, raw responses, or exact private evidence. Acquisition is frozen at 101 combined successful calls, and no further Nansen call is planned or authorized by this checkpoint.
 
 ## Public policies and submission prerequisites
 
